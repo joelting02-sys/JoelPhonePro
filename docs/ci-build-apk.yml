@@ -1,0 +1,78 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - 'apk/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and publish APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Gradle 8.7
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build APK from repository source
+        run: gradle --no-daemon clean assembleDebug
+
+      - name: Publish and hash APK
+        run: |
+          mkdir -p apk
+          cp app/build/outputs/apk/debug/app-debug.apk apk/JoelPhonePro-v1.0.0.apk
+          cp app/build/outputs/apk/debug/app-debug.apk apk/JoelPhonePro.apk
+          sha256sum apk/JoelPhonePro-v1.0.0.apk > apk/JoelPhonePro.apk.sha256
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: JoelPhonePro-v1.0.0-APK
+          path: apk/JoelPhonePro-v1.0.0.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Commit APK to main
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -f apk/JoelPhonePro.apk apk/JoelPhonePro-v1.0.0.apk apk/JoelPhonePro.apk.sha256
+          git commit -m 'Build JoelPhonePro v1.0.0 #${{ github.run_number }} [skip ci]' || true
+          git push
+
+      - name: Publish GitHub Release v1.0.0
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: v1.0.0
+          name: Joel Phone Pro v1.0.0 (Android APK)
+          make_latest: true
+          body: |
+            ## Joel Phone Pro v1.0.0 (Android APK)
+
+            - **Direct APK**: `JoelPhonePro-v1.0.0.apk`
+            - Multi-threaded HTTP `Range` downloader (`4` / `8` / `16` / `32` concurrent threads) with pause/resume, live per-chunk progress visualization, smart share-text URL extractor, Android `ACTION_SEND` share receiver, built-in WebView media sniffer (`Cookie` + `Referer`), and Scoped Storage saving to `Download/JoelPhonePro/`.
+          files: |
+            apk/JoelPhonePro-v1.0.0.apk
+            apk/JoelPhonePro.apk.sha256

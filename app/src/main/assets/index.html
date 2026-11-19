@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Joel Phone Pro</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-root">
+    <!-- Top App Header -->
+    <header class="top-bar">
+      <div class="brand-wrap">
+        <svg class="brand-logo" viewBox="0 0 64 64" width="32" height="32" aria-hidden="true">
+          <rect x="3" y="3" width="58" height="58" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="3.2"/>
+          <path d="M31.5 16.5H45.5V20.2C42.9 20.6 41.8 21.7 41.8 24.6V37.6C41.8 45.2 36.7 49.8 28.9 49.8C23.5 49.8 19.6 47.2 18.4 43.7C17.9 42.1 18.6 40.2 20.4 39.7C22 39.3 23.6 40.2 24.3 41.9C25.2 44.1 26.8 45.5 29.3 45.5C33.4 45.5 35.4 42.8 35.4 37.4V24.6C35.4 21.7 34.3 20.6 31.5 20.2V16.5Z" fill="#2563EB"/>
+        </svg>
+        <div class="brand-text">
+          <div class="brand-name">Joel Phone Pro</div>
+          <div class="brand-sub" id="brandSub">多线程极速下载</div>
+        </div>
+      </div>
+
+      <div class="top-actions">
+        <div class="speed-pill" id="globalSpeedPill">
+          <span class="speed-dot" id="globalSpeedDot"></span>
+          <span id="globalSpeedText">0 B/s</span>
+        </div>
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn active" data-lang="zh">中文</button>
+          <button type="button" class="lang-btn" data-lang="en">EN</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Scrollable Viewport -->
+    <main class="main-scroll">
+      <!-- Tab 1: Smart Link Extractor -->
+      <section class="tab-panel active" id="panel-extract">
+        <div class="card">
+          <div class="card-head">
+            <h2 class="card-title" id="pasteTitle">智能提取与粘贴</h2>
+            <span class="chip-soft" id="shareTipBadge">支持系统分享直达</span>
+          </div>
+          <textarea
+            id="rawInput"
+            class="paste-area"
+            rows="3"
+            placeholder="粘贴任意链接或带杂字的分享文案（如抖音、B站、直链、APK、压缩包）…"
+          ></textarea>
+          <div class="paste-toolbar">
+            <button type="button" class="btn btn-subtle flex-1" id="pasteClipBtn">📋 一键粘贴剪贴板</button>
+            <button type="button" class="btn btn-ghost" id="clearInputBtn">清空</button>
+          </div>
+        </div>
+
+        <!-- Extracted URL & Thread Config -->
+        <div class="card hidden" id="extractResultCard">
+          <div class="extract-banner">
+            <span class="badge-blue" id="extractBadge">已识别链接</span>
+            <button type="button" class="link-mini" id="copyCleanUrlBtn">复制纯链</button>
+          </div>
+          <div class="clean-url-box" id="cleanUrlPreview"></div>
+
+          <div class="field-group">
+            <label class="field-label" for="fileNameInput" id="fileNameLabel">保存文件名</label>
+            <input type="text" id="fileNameInput" class="text-input mono" placeholder="example.mp4" />
+          </div>
+
+          <button type="button" class="accordion-btn" id="toggleHeadersBtn">
+            <span id="toggleHeadersLabel">▸ 高级请求头 (Referer / Cookie 选填)</span>
+          </button>
+          <div class="headers-drawer hidden" id="headersDrawer">
+            <div class="field-group">
+              <label class="field-label" for="refererInput">Referer</label>
+              <input type="text" id="refererInput" class="text-input mono" placeholder="https://example.com/" />
+            </div>
+            <div class="field-group">
+              <label class="field-label" for="cookieInput">Cookie</label>
+              <input type="text" id="cookieInput" class="text-input mono" placeholder="key=value; ..." />
+            </div>
+          </div>
+
+          <div class="field-group">
+            <div class="field-label-row">
+              <span class="field-label" id="threadSelectLabel">并发线程数</span>
+              <span class="field-hint" id="threadHint">Range 多线程分片提速</span>
+            </div>
+            <div class="thread-grid" id="threadSelector">
+              <button type="button" class="thread-pill" data-threads="4">4 线程</button>
+              <button type="button" class="thread-pill" data-threads="8">8 线程</button>
+              <button type="button" class="thread-pill active" data-threads="16">16 线程<small>推荐</small></button>
+              <button type="button" class="thread-pill" data-threads="32">32 线程<small>极速</small></button>
+            </div>
+          </div>
+
+          <div class="cta-stack">
+            <button type="button" class="btn btn-primary btn-lg" id="startDownloadBtn">
+              ⚡ 开始多线程下载
+            </button>
+            <button type="button" class="btn btn-outline btn-md" id="openInSnifferBtn">
+              🌐 如果是网页，点此内置嗅探真实资源
+            </button>
+          </div>
+        </div>
+
+        <!-- Quick Hint Card when input is empty -->
+        <div class="card tip-card" id="extractEmptyHint">
+          <div class="tip-row">
+            <span class="tip-icon">⚡</span>
+            <div>
+              <div class="tip-title" id="tip1Title">真 · 多线程 HTTP Range 分片加速</div>
+              <div class="tip-desc" id="tip1Desc">把大文件切分为 4~32 个字节分段并发拉取，断网暂停不丢分片进度。</div>
+            </div>
+          </div>
+          <div class="tip-row">
+            <span class="tip-icon">🧹</span>
+            <div>
+              <div class="tip-title" id="tip2Title">自动去杂字 + 手机系统「分享」接入</div>
+              <div class="tip-desc" id="tip2Desc">在微信、浏览器、B站点分享 → 选择 Joel Phone Pro，自动提取纯净下载链接。</div>
+            </div>
+          </div>
+          <div class="tip-row">
+            <span class="tip-icon">📂</span>
+            <div>
+              <div class="tip-title" id="tip3Title">统一存入手机 Download/JoelPhonePro/</div>
+              <div class="tip-desc" id="tip3Desc">下载完直接出现在系统文件管理器与下载目录，可一键打开或转发。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tab 2: Downloads Queue -->
+      <section class="tab-panel" id="panel-downloads">
+        <div class="filter-bar">
+          <div class="segmented" id="taskFilterSwitch">
+            <button type="button" class="seg-btn active" data-filter="all" id="filterAllBtn">全部</button>
+            <button type="button" class="seg-btn" data-filter="active" id="filterActiveBtn">进行中</button>
+            <button type="button" class="seg-btn" data-filter="done" id="filterDoneBtn">已完成</button>
+          </div>
+          <button type="button" class="btn btn-subtle btn-sm hidden" id="clearDoneBtn">清理已完成</button>
+        </div>
+
+        <div id="taskListContainer" class="task-list"></div>
+      </section>
+
+      <!-- Tab 3: Native Web Media Sniffer -->
+      <section class="tab-panel" id="panel-sniffer">
+        <div class="card">
+          <h2 class="card-title" id="snifferTitle">内置网页媒体与资源嗅探</h2>
+          <p class="card-desc" id="snifferDesc">
+            遇到网盘落地页或网页内嵌视频时，在内置浏览器打开它，自动捕获真实媒体直链与当前 Cookie / Referer 并多线程拉取。
+          </p>
+          <div class="sniffer-input-row">
+            <input type="url" id="snifferUrlBox" class="text-input mono flex-1" placeholder="https://..." />
+            <button type="button" class="btn btn-primary" id="launchSnifferBtn">🌐 打开嗅探</button>
+          </div>
+        </div>
+
+        <div class="section-subhead">
+          <span id="sniffedListTitle">已捕获资源</span>
+          <button type="button" class="link-mini" id="clearSniffedBtn">清空列表</button>
+        </div>
+
+        <div id="sniffedListContainer" class="task-list"></div>
+      </section>
+
+      <!-- Tab 4: Settings -->
+      <section class="tab-panel" id="panel-settings">
+        <div class="card">
+          <h2 class="card-title" id="settingsHeading">下载引擎设置</h2>
+
+          <div class="setting-block">
+            <div class="setting-label" id="setDefaultThreadsLabel">默认并发线程数</div>
+            <div class="thread-grid" id="defaultThreadsGrid">
+              <button type="button" class="thread-pill" data-threads="4">4</button>
+              <button type="button" class="thread-pill" data-threads="8">8</button>
+              <button type="button" class="thread-pill active" data-threads="16">16</button>
+              <button type="button" class="thread-pill" data-threads="32">32</button>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-label" id="setConcurrentLabel">同时运行任务上限</div>
+            <div class="thread-grid" id="concurrentLimitGrid">
+              <button type="button" class="thread-pill" data-limit="1">1</button>
+              <button type="button" class="thread-pill active" data-limit="2">2</button>
+              <button type="button" class="thread-pill" data-limit="3">3</button>
+              <button type="button" class="thread-pill" data-limit="5">5</button>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-label" id="setUaLabel">请求伪装标识 (User-Agent)</div>
+            <div class="segmented full-width" id="uaSwitch">
+              <button type="button" class="seg-btn active" data-ua="desktop" id="uaDesktopBtn">桌面端 Chrome</button>
+              <button type="button" class="seg-btn" data-ua="mobile" id="uaMobileBtn">移动端 Android</button>
+            </div>
+          </div>
+
+          <div class="setting-block save-path-box">
+            <div class="setting-label" id="setPathLabel">文件保存目录</div>
+            <div class="mono path-value" id="savePathValue">Download/JoelPhonePro/</div>
+            <div class="setting-note" id="setPathNote">遵循 Android 公共下载目录规范，无需授予高危全盘读写权限，系统文件管理器直接可见。</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Navigation Bar -->
+    <nav class="bottom-nav" aria-label="Main navigation">
+      <button type="button" class="nav-btn active" data-tab="extract">
+        <span class="nav-icon">⚡</span>
+        <span class="nav-label" id="navExtractLabel">智能提取</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="downloads">
+        <span class="nav-icon-wrap">
+          <span class="nav-icon">📥</span>
+          <span class="nav-badge hidden" id="navDownloadsBadge">0</span>
+        </span>
+        <span class="nav-label" id="navDownloadsLabel">下载队列</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="sniffer">
+        <span class="nav-icon-wrap">
+          <span class="nav-icon">🌐</span>
+          <span class="nav-badge hidden" id="navSnifferBadge">0</span>
+        </span>
+        <span class="nav-label" id="navSnifferLabel">网页嗅探</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="settings">
+        <span class="nav-icon">⚙️</span>
+        <span class="nav-label" id="navSettingsLabel">设置</span>
+      </button>
+    </nav>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>
