@@ -8,287 +8,390 @@
 </head>
 <body>
   <div class="app-root">
-    <!-- Top App Header -->
-    <header class="top-bar">
-      <div class="brand-wrap">
-        <svg class="brand-logo" viewBox="0 0 64 64" width="32" height="32" aria-hidden="true">
-          <rect x="3" y="3" width="58" height="58" rx="16" fill="#FFFFFF" stroke="#2563EB" stroke-width="3.2"/>
-          <path d="M31.5 16.5H45.5V20.2C42.9 20.6 41.8 21.7 41.8 24.6V37.6C41.8 45.2 36.7 49.8 28.9 49.8C23.5 49.8 19.6 47.2 18.4 43.7C17.9 42.1 18.6 40.2 20.4 39.7C22 39.3 23.6 40.2 24.3 41.9C25.2 44.1 26.8 45.5 29.3 45.5C33.4 45.5 35.4 42.8 35.4 37.4V24.6C35.4 21.7 34.3 20.6 31.5 20.2V16.5Z" fill="#2563EB"/>
-        </svg>
-        <div class="brand-text">
-          <div class="brand-name">Joel Phone Pro</div>
-          <div class="brand-sub" id="brandSub">多线程极速下载</div>
-        </div>
+    <!-- Top Browser / Search Toolbar (Video Downloader toolbar_content style) -->
+    <header class="top-toolbar" id="topToolbar">
+      <button type="button" class="toolbar-icon-btn" id="topHomeBtn" title="首页" aria-label="Home">🏠</button>
+      <div class="search-pill">
+        <span class="search-icon">🔍</span>
+        <input
+          type="text"
+          id="topSearchInput"
+          class="search-input"
+          inputmode="url"
+          autocomplete="off"
+          placeholder="搜索或输入网址"
+        />
+        <button type="button" class="search-go-btn" id="topSearchGoBtn">前往</button>
       </div>
-
-      <div class="top-actions">
-        <div class="speed-pill" id="globalSpeedPill">
-          <span class="speed-dot" id="globalSpeedDot"></span>
-          <span id="globalSpeedText">0 B/s</span>
-        </div>
-        <div class="lang-switch" role="group" aria-label="Language">
-          <button type="button" class="lang-btn active" data-lang="zh">中文</button>
-          <button type="button" class="lang-btn" data-lang="en">EN</button>
-        </div>
-      </div>
+      <button type="button" class="toolbar-icon-btn" id="openDirectModalBtn" title="新建直链下载" aria-label="New direct download">➕</button>
+      <button type="button" class="toolbar-icon-btn" id="openSettingsBtn" title="设置" aria-label="Settings">⚙️</button>
     </header>
 
-    <!-- Main Scrollable Viewport -->
+    <!-- Main Content Viewport above 60px Bottom Nav -->
     <main class="main-scroll">
-      <!-- Tab 1: Smart Link Extractor -->
-      <section class="tab-panel active" id="panel-extract">
-        <div class="panel-body extract-body">
-          <!-- Quick Hint Card when input is empty -->
-          <div class="card tip-card" id="extractEmptyHint">
-            <div class="tip-row">
-              <span class="tip-icon">⚡</span>
+      <!-- TAB 1: Browser Home / Speed Dial (窗口) -->
+      <section class="tab-panel active" id="panel-browser">
+        <div class="panel-body">
+          <!-- Speed & Brand Micro Strip -->
+          <div class="brand-strip">
+            <div class="brand-left">
+              <span class="brand-pill-logo">⬇</span>
               <div>
-                <div class="tip-title" id="tip1Title">真 · 多线程 HTTP Range 分片加速</div>
-                <div class="tip-desc" id="tip1Desc">把大文件切分为 4~32 个字节分段并发拉取，断网暂停不丢分片进度。</div>
+                <div class="brand-title">Joel Phone Pro</div>
+                <div class="brand-sub" id="brandSub">视频嗅探 · 16 线程极速下载</div>
               </div>
             </div>
-            <div class="tip-row">
-              <span class="tip-icon">🧹</span>
-              <div>
-                <div class="tip-title" id="tip2Title">自动去杂字 + 手机系统「分享」接入</div>
-                <div class="tip-desc" id="tip2Desc">在微信、浏览器、B站点分享 → 选择 Joel Phone Pro，自动提取纯净下载链接。</div>
-              </div>
-            </div>
-            <div class="tip-row">
-              <span class="tip-icon">📂</span>
-              <div>
-                <div class="tip-title" id="tip3Title">统一存入手机 Download/JoelPhonePro/</div>
-                <div class="tip-desc" id="tip3Desc">下载完直接出现在系统文件管理器与下载目录，可一键打开或转发。</div>
-              </div>
+            <div class="speed-pill" id="globalSpeedPill">
+              <span class="speed-dot"></span>
+              <span id="globalSpeedText">0 B/s</span>
             </div>
           </div>
 
-          <div class="card" id="extractInputCard">
-            <div class="card-head">
-              <h2 class="card-title" id="pasteTitle">智能提取与粘贴</h2>
-              <span class="chip-soft" id="shareTipBadge">支持系统分享直达</span>
+          <!-- Copied Link Auto Banner (Replicates dialog_open_copied_link) -->
+          <div class="copied-card hidden" id="copiedLinkCard">
+            <div class="copied-head">
+              <span class="copied-title" id="copiedCardTitle">🔗 您复制的网址</span>
+              <button type="button" class="icon-close-mini" id="copiedDismissBtn" aria-label="Dismiss">✕</button>
             </div>
-            <textarea
-              id="rawInput"
-              class="paste-area"
-              rows="2"
-              placeholder="粘贴任意链接或带杂字的分享文案（如抖音、B站、直链、APK、压缩包）…"
-            ></textarea>
+            <div class="copied-url mono" id="copiedLinkText"></div>
+            <div class="copied-actions">
+              <button type="button" class="btn btn-accent flex-1 btn-thumb-sm" id="copiedOpenBrowserBtn">🌐 打开网页嗅探</button>
+              <button type="button" class="btn btn-subtle btn-thumb-sm" id="copiedDirectDownloadBtn">⬇ 直链下载</button>
+            </div>
           </div>
 
-          <!-- Extracted URL & Thread Config -->
-          <div class="card hidden" id="extractResultCard">
-            <div class="extract-banner">
-              <span class="badge-blue" id="extractBadge">已识别链接</span>
-              <button type="button" class="link-mini" id="copyCleanUrlBtn">复制纯链</button>
+          <!-- Popular Video Websites Grid -->
+          <div class="card section-card">
+            <div class="section-head">
+              <span class="section-title" id="sitesSectionTitle">热门视频网站</span>
+              <span class="section-hint" id="sitesSectionHint">打开即自动嗅探</span>
             </div>
-            <div class="clean-url-box" id="cleanUrlPreview"></div>
-
-            <div class="field-group">
-              <label class="field-label" for="fileNameInput" id="fileNameLabel">保存文件名</label>
-              <input type="text" id="fileNameInput" class="text-input mono" placeholder="example.mp4" />
-            </div>
-
-            <button type="button" class="accordion-btn" id="toggleHeadersBtn">
-              <span id="toggleHeadersLabel">▸ 高级请求头 (Referer / Cookie 选填)</span>
-            </button>
-            <div class="headers-drawer hidden" id="headersDrawer">
-              <div class="field-group">
-                <label class="field-label" for="refererInput">Referer</label>
-                <input type="text" id="refererInput" class="text-input mono" placeholder="https://example.com/" />
-              </div>
-              <div class="field-group">
-                <label class="field-label" for="cookieInput">Cookie</label>
-                <input type="text" id="cookieInput" class="text-input mono" placeholder="key=value; ..." />
-              </div>
-            </div>
-
-            <div class="field-group">
-              <div class="field-label-row">
-                <span class="field-label" id="threadSelectLabel">并发线程数</span>
-                <span class="field-hint" id="threadHint">Range 多线程分片提速</span>
-              </div>
-              <div class="thread-grid" id="threadSelector">
-                <button type="button" class="thread-pill" data-threads="4">4 线程</button>
-                <button type="button" class="thread-pill" data-threads="8">8 线程</button>
-                <button type="button" class="thread-pill active" data-threads="16">16 线程<small>推荐</small></button>
-                <button type="button" class="thread-pill" data-threads="32">32 线程<small>极速</small></button>
-              </div>
-            </div>
-
-            <div class="cta-stack">
-              <button type="button" class="btn btn-primary btn-lg" id="startDownloadBtn">
-                ⚡ 开始多线程下载
+            <div class="sites-grid" id="sitesGrid">
+              <button type="button" class="site-item" data-url="https://www.douyin.com">
+                <span class="site-icon site-douyin">抖音</span>
+                <span class="site-label">抖音</span>
               </button>
-              <button type="button" class="btn btn-outline btn-md" id="openInSnifferBtn">
-                🌐 如果是网页，点此内置嗅探真实资源
+              <button type="button" class="site-item" data-url="https://x.com">
+                <span class="site-icon site-x">𝕏</span>
+                <span class="site-label">X / Twitter</span>
               </button>
+              <button type="button" class="site-item" data-url="https://www.instagram.com">
+                <span class="site-icon site-ig">IG</span>
+                <span class="site-label">Instagram</span>
+              </button>
+              <button type="button" class="site-item" data-url="https://www.tiktok.com">
+                <span class="site-icon site-tt">TT</span>
+                <span class="site-label">TikTok</span>
+              </button>
+              <button type="button" class="site-item" data-url="https://www.xiaohongshu.com">
+                <span class="site-icon site-xhs">小红书</span>
+                <span class="site-label">小红书</span>
+              </button>
+              <button type="button" class="site-item" data-url="https://m.bilibili.com">
+                <span class="site-icon site-bili">B站</span>
+                <span class="site-label">哔哩哔哩</span>
+              </button>
+              <button type="button" class="site-item" data-url="https://m.facebook.com/watch">
+                <span class="site-icon site-fb">f</span>
+                <span class="site-label">Facebook</span>
+              </button>
+              <button type="button" class="site-item" data-url="https://vimeo.com/watch">
+                <span class="site-icon site-vimeo">V</span>
+                <span class="site-label">Vimeo</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Two-Step Visual Guide Card (只需两步，即可下载视频) -->
+          <div class="card guide-card">
+            <div class="guide-head">
+              <span class="section-title" id="guideCardTitle">只需两步，即可下载视频</span>
+            </div>
+            <div class="guide-steps">
+              <div class="guide-step">
+                <span class="guide-num">1</span>
+                <div class="guide-copy">
+                  <div class="guide-step-title" id="guideStep1Title">进入网站并播放要下载的视频</div>
+                  <div class="guide-step-desc" id="guideStep1Desc">点击上方网站图标或粘贴分享口令，打开目标视频/图集页面。</div>
+                </div>
+              </div>
+              <div class="guide-step">
+                <span class="guide-num step2">⬇</span>
+                <div class="guide-copy">
+                  <div class="guide-step-title" id="guideStep2Title">点击右下角亮起的下载按钮，再选画质</div>
+                  <div class="guide-step-desc" id="guideStep2Desc">网页右下角只悬浮唯一一个下载标志，检测到当前完整视频（含声音）后点开即可选清晰度并多线程下载。</div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Sticky Thumb Zone Dock -->
+        <!-- Bottom Thumb Dock inside Browser Home -->
         <div class="thumb-dock">
           <div class="thumb-row">
-            <button type="button" class="btn btn-primary btn-thumb flex-1" id="pasteClipBtn">📋 一键粘贴剪贴板</button>
-            <button type="button" class="btn btn-subtle btn-thumb" id="pasteAndSniffQuickBtn">🌐 粘贴嗅探</button>
-            <button type="button" class="btn btn-ghost btn-thumb-icon" id="clearInputBtn">清空</button>
+            <button type="button" class="btn btn-accent btn-thumb flex-1" id="homePasteOpenBtn">📋 粘贴链接并打开</button>
+            <button type="button" class="btn btn-blue-soft btn-thumb hidden" id="homeResumeBrowserBtn">🌐 返回网页</button>
           </div>
         </div>
       </section>
 
-      <!-- Tab 2: Downloads Queue -->
-      <section class="tab-panel" id="panel-downloads">
+      <!-- TAB 2: Download Progress (下载中) -->
+      <section class="tab-panel" id="panel-progress">
+        <div class="subtab-bar">
+          <div class="subtab-info">
+            <span class="boost-badge">⚡</span>
+            <span id="progressStabilityText">多线程分片加速 · 提升下载稳定性</span>
+          </div>
+          <div class="subtab-actions">
+            <button type="button" class="btn btn-subtle btn-mini-bar" id="pauseAllBtn">⏸ 全部暂停</button>
+            <button type="button" class="btn btn-blue-soft btn-mini-bar" id="resumeAllBtn">▶ 全部开始</button>
+          </div>
+        </div>
+        <div class="progress-browser-banner hidden" id="progressReturnBrowserBar">
+          <span class="progress-browser-text" id="progressBrowserText">🌐 网页仍在窗口保持打开</span>
+          <button type="button" class="btn btn-blue-soft btn-mini-bar" id="progressBackToBrowserBtn">返回网页继续浏览</button>
+        </div>
+        <div class="panel-body" id="progressBody">
+          <div id="progressListContainer" class="task-list"></div>
+        </div>
+      </section>
+
+      <!-- TAB 3: Finished Files (已下载) -->
+      <section class="tab-panel" id="panel-finished">
+        <div class="subtab-bar finished-bar">
+          <div class="path-chip mono">📁 Download/JoelPhonePro</div>
+          <button type="button" class="btn btn-subtle btn-mini-bar hidden" id="clearFinishedBtn">🧹 清理记录</button>
+        </div>
+        <div class="filter-strip" id="finishedFilterSwitch">
+          <button type="button" class="seg-btn filter-chip active" data-type="all" id="finFilterAllBtn">全部</button>
+          <button type="button" class="seg-btn filter-chip" data-type="video" id="finFilterVideoBtn">🎬 视频</button>
+          <button type="button" class="seg-btn filter-chip" data-type="image" id="finFilterImageBtn">🖼️ 图片</button>
+          <button type="button" class="seg-btn filter-chip" data-type="audio" id="finFilterAudioBtn">🎵 音频</button>
+        </div>
         <div class="panel-body">
-          <div id="taskListContainer" class="task-list"></div>
-        </div>
-
-        <div class="thumb-dock downloads-dock">
-          <div class="filter-bar">
-            <div class="segmented" id="taskFilterSwitch">
-              <button type="button" class="seg-btn active" data-filter="all" id="filterAllBtn">全部</button>
-              <button type="button" class="seg-btn" data-filter="active" id="filterActiveBtn">进行中</button>
-              <button type="button" class="seg-btn" data-filter="done" id="filterDoneBtn">已完成</button>
-            </div>
-            <button type="button" class="btn btn-subtle btn-thumb-sm hidden" id="clearDoneBtn">清理已完成</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Tab 3: Native Web Media Sniffer -->
-      <section class="tab-panel" id="panel-sniffer">
-        <div class="panel-body">
-          <div class="card sniffer-intro-card">
-            <div class="card-head">
-              <h2 class="card-title" id="snifferTitle">内置网页媒体与资源嗅探</h2>
-              <span class="chip-soft" id="snifferSmartBadge">自动去杂字</span>
-            </div>
-            <p class="card-desc" id="snifferDesc">
-              支持直接粘贴抖音 / 小红书 / B站整段分享文案或网页链接，自动剔除多余文字后打开内置浏览器嗅探真实视频与图集，支持下载前「预浏览」与全选批量下载。
-            </p>
-          </div>
-
-          <div class="section-subhead">
-            <span id="sniffedListTitle">已捕获资源</span>
-          </div>
-
-          <div id="sniffedListContainer" class="task-list"></div>
-        </div>
-
-        <div class="thumb-dock sniffer-dock">
-          <div class="sniff-batch-bar hidden" id="sniffBatchBar">
-            <button type="button" class="btn btn-subtle btn-thumb-sm" id="sniffSelectAllBtn">☑️ 全选本页</button>
-            <button type="button" class="btn btn-primary btn-thumb-sm flex-1" id="sniffBatchDownloadBtn" disabled>⚡ 批量下载选中 (0)</button>
-          </div>
-
-          <div class="sniff-filter-row" id="sniffTypeFilterSwitch">
-            <button type="button" class="seg-btn filter-chip active" data-type="all" id="sniffFilterAllBtn">全部</button>
-            <button type="button" class="seg-btn filter-chip" data-type="video" id="sniffFilterVideoBtn">🎬 视频</button>
-            <button type="button" class="seg-btn filter-chip" data-type="audio" id="sniffFilterAudioBtn">🎵 音频</button>
-            <button type="button" class="seg-btn filter-chip" data-type="image" id="sniffFilterImageBtn">🖼️ 图片</button>
-            <button type="button" class="seg-btn filter-chip" data-type="file" id="sniffFilterFileBtn">📦 文件</button>
-            <button type="button" class="btn btn-ghost filter-chip-btn" id="clearSniffedBtn">清空</button>
-          </div>
-
-          <div class="sniffer-clean-preview hidden" id="snifferCleanPreviewWrap">
-            <div class="sniffer-clean-head">
-              <span class="badge-blue" id="snifferExtractBadge">已自动过滤杂字</span>
-            </div>
-            <div class="clean-url-box compact" id="snifferCleanUrlText"></div>
-          </div>
-
-          <textarea
-            id="snifferUrlBox"
-            class="paste-area sniffer-paste-area"
-            rows="2"
-            placeholder="粘贴抖音/小红书分享文案（如：7.46 复制打开抖音… https://v.douyin.com/…）或网页链接…"
-          ></textarea>
-
-          <div class="thumb-row">
-            <button type="button" class="btn btn-primary btn-thumb flex-1" id="snifferPasteGoBtn">📋 粘贴并嗅探</button>
-            <button type="button" class="btn btn-subtle btn-thumb" id="launchSnifferBtn">🌐 打开嗅探</button>
-            <button type="button" class="btn btn-ghost btn-thumb-icon" id="snifferClearInputBtn">清空</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Tab 4: Settings -->
-      <section class="tab-panel" id="panel-settings">
-        <div class="panel-body extract-body">
-          <div class="card">
-            <h2 class="card-title" id="settingsHeading">下载引擎设置</h2>
-
-            <div class="setting-block">
-              <div class="setting-label" id="setDefaultThreadsLabel">默认并发线程数</div>
-              <div class="thread-grid" id="defaultThreadsGrid">
-                <button type="button" class="thread-pill" data-threads="4">4</button>
-                <button type="button" class="thread-pill" data-threads="8">8</button>
-                <button type="button" class="thread-pill active" data-threads="16">16</button>
-                <button type="button" class="thread-pill" data-threads="32">32</button>
-              </div>
-            </div>
-
-            <div class="setting-block">
-              <div class="setting-label" id="setConcurrentLabel">同时运行任务上限</div>
-              <div class="thread-grid" id="concurrentLimitGrid">
-                <button type="button" class="thread-pill" data-limit="1">1</button>
-                <button type="button" class="thread-pill active" data-limit="2">2</button>
-                <button type="button" class="thread-pill" data-limit="3">3</button>
-                <button type="button" class="thread-pill" data-limit="5">5</button>
-              </div>
-            </div>
-
-            <div class="setting-block">
-              <div class="setting-label" id="setUaLabel">请求伪装标识 (User-Agent)</div>
-              <div class="segmented full-width" id="uaSwitch">
-                <button type="button" class="seg-btn active" data-ua="desktop" id="uaDesktopBtn">桌面端 Chrome</button>
-                <button type="button" class="seg-btn" data-ua="mobile" id="uaMobileBtn">移动端 Android</button>
-              </div>
-            </div>
-
-            <div class="setting-block">
-              <div class="setting-label" id="setLangLabel">界面语言 / Language</div>
-              <div class="segmented full-width" id="settingsLangSwitch">
-                <button type="button" class="seg-btn active" data-lang="zh">简体中文</button>
-                <button type="button" class="seg-btn" data-lang="en">English</button>
-              </div>
-            </div>
-
-            <div class="setting-block save-path-box">
-              <div class="setting-label" id="setPathLabel">文件保存目录</div>
-              <div class="mono path-value" id="savePathValue">Download/JoelPhonePro/</div>
-              <div class="setting-note" id="setPathNote">遵循 Android 公共下载目录规范，无需授予高危全盘读写权限，系统文件管理器直接可见。</div>
-            </div>
-          </div>
+          <div id="finishedListContainer" class="task-list"></div>
         </div>
       </section>
     </main>
 
-    <!-- Bottom Navigation Bar -->
-    <nav class="bottom-nav" aria-label="Main navigation">
-      <button type="button" class="nav-btn active" data-tab="extract">
-        <span class="nav-icon">⚡</span>
-        <span class="nav-label" id="navExtractLabel">智能提取</span>
-      </button>
-      <button type="button" class="nav-btn" data-tab="downloads">
-        <span class="nav-icon-wrap">
-          <span class="nav-icon">📥</span>
-          <span class="nav-badge hidden" id="navDownloadsBadge">0</span>
-        </span>
-        <span class="nav-label" id="navDownloadsLabel">下载队列</span>
-      </button>
-      <button type="button" class="nav-btn" data-tab="sniffer">
+    <!-- Persistent 3-Tab Bottom Navigation Bar (60px height matching native sniffer bottomMargin) -->
+    <nav class="bottom-nav" aria-label="Bottom navigation">
+      <button type="button" class="nav-btn active" data-tab="browser">
         <span class="nav-icon-wrap">
           <span class="nav-icon">🌐</span>
-          <span class="nav-badge hidden" id="navSnifferBadge">0</span>
         </span>
-        <span class="nav-label" id="navSnifferLabel">网页嗅探</span>
+        <span class="nav-label" id="navBrowserLabel">窗口</span>
       </button>
-      <button type="button" class="nav-btn" data-tab="settings">
-        <span class="nav-icon">⚙️</span>
-        <span class="nav-label" id="navSettingsLabel">设置</span>
+      <button type="button" class="nav-btn" data-tab="progress">
+        <span class="nav-icon-wrap">
+          <span class="nav-icon">⏬</span>
+          <span class="nav-badge hidden" id="progressNavBadge">0</span>
+        </span>
+        <span class="nav-label" id="navProgressLabel">下载中</span>
+      </button>
+      <button type="button" class="nav-btn" data-tab="finished">
+        <span class="nav-icon-wrap">
+          <span class="nav-icon">✅</span>
+          <span class="nav-badge blue hidden" id="finishedNavBadge">0</span>
+        </span>
+        <span class="nav-label" id="navFinishedLabel">已下载</span>
       </button>
     </nav>
+  </div>
+
+  <!-- Single-Video Quality Picker Drawer over Live Webpage (download_manual_drawer.xml) -->
+  <div class="drawer-modal hidden" id="downloadDrawerModal" role="dialog" aria-modal="true">
+    <div class="drawer-backdrop" id="drawerBackdrop"></div>
+    <div class="download-drawer-sheet">
+      <div class="drawer-handle"></div>
+
+      <div class="drawer-header">
+        <div class="drawer-title-wrap">
+          <span class="drawer-title" id="drawerTitle">下载当前视频</span>
+          <span class="complete-video-pill" id="drawerCompleteBadge">🎬 完整视频（含声音）</span>
+        </div>
+        <button type="button" class="icon-close-mini" id="drawerTopCloseBtn" aria-label="Close">✕</button>
+      </div>
+
+      <div class="drawer-scroll-body">
+        <!-- Top Current Video Card (DrawerRenameView) -->
+        <div class="drawer-video-card" id="drawerVideoCard">
+          <div class="drawer-thumb-box large" id="drawerThumbBox">
+            <img class="drawer-thumb-img hidden" id="drawerCoverImg" alt="cover" />
+            <span class="drawer-thumb-fallback" id="drawerThumbFallback">▶</span>
+            <span class="drawer-thumb-badge hidden" id="drawerDurBadge"></span>
+            <span class="drawer-thumb-preview-tag" id="drawerPreviewTag">👁️ 预浏览</span>
+          </div>
+          <div class="drawer-video-info">
+            <div class="drawer-item-name" id="drawerVideoTitle">当前视频</div>
+            <div class="drawer-selected-meta" id="drawerSelectedMeta">高清完整视频</div>
+          </div>
+        </div>
+
+        <!-- Inline Rename Bar (toggled by 重命名 button) -->
+        <div class="drawer-rename-bar hidden" id="drawerRenameBar">
+          <input type="text" class="drawer-rename-input" id="drawerRenameInput" placeholder="输入保存文件名…" />
+          <button type="button" class="btn btn-primary btn-mini-bar" id="drawerRenameDoneBtn">确定</button>
+        </div>
+
+        <!-- Inline Video Preview Player (toggled by tapping thumbnail / 预浏览) -->
+        <div class="preview-drawer hidden" id="drawerInlinePreview">
+          <video class="mini-preview-video" id="drawerPreviewVideo" controls playsinline preload="metadata"></video>
+          <div class="preview-meta-bar" id="drawerPreviewMeta">正在加载视频预览…</div>
+        </div>
+
+        <!-- Quality Selection Grid Header -->
+        <div class="drawer-quality-head">
+          <span class="drawer-quality-title" id="drawerQualityLabel">选择清晰度</span>
+        </div>
+
+        <!-- 2-Column Quality Cards (item_manual_drawer.xml) -->
+        <div class="quality-grid" id="drawerQualityGrid"></div>
+
+        <!-- Prominent Multi-Thread Acceleration Box -->
+        <div class="drawer-thread-box">
+          <div class="drawer-thread-head">
+            <span class="drawer-thread-title" id="drawerThreadTitle">⚡ 多线程分片加速</span>
+            <span class="drawer-thread-badge" id="drawerThreadBadge">当前：16 线程并发</span>
+          </div>
+          <div class="drawer-thread-grid" id="drawerThreadSelector">
+            <button type="button" class="drawer-thread-btn" data-threads="4">4 线程</button>
+            <button type="button" class="drawer-thread-btn" data-threads="8">8 线程</button>
+            <button type="button" class="drawer-thread-btn active" data-threads="16">16 线程</button>
+            <button type="button" class="drawer-thread-btn" data-threads="32">32 线程</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Bottom Action Row (Close | Rename | Download) -->
+      <div class="drawer-bottom-bar">
+        <button type="button" class="btn btn-subtle btn-thumb" id="drawerCloseBtn">✕ 关闭</button>
+        <button type="button" class="btn btn-blue-soft btn-thumb" id="drawerRenameBtn">✎ 重命名</button>
+        <button type="button" class="btn btn-accent btn-thumb flex-1" id="drawerDownloadBtn">⚡ 16线程高速下载</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Direct Link / Manual Multi-Thread Modal -->
+  <div class="sheet-modal hidden" id="directModal" role="dialog" aria-modal="true">
+    <div class="sheet-backdrop" id="directBackdrop"></div>
+    <div class="sheet-card">
+      <div class="drawer-handle"></div>
+      <div class="sheet-head">
+        <span class="drawer-title" id="directModalTitle">新建直链 / 口令下载</span>
+        <button type="button" class="icon-close-mini" id="directCloseBtn">✕</button>
+      </div>
+
+      <div class="sheet-body">
+        <textarea
+          id="directRawInput"
+          class="paste-area"
+          rows="2"
+          placeholder="粘贴链接或带文字的分享口令，自动清理杂字…"
+        ></textarea>
+
+        <div class="direct-clean-box hidden" id="directCleanBox">
+          <span class="badge-blue" id="directCleanBadge">已识别链接</span>
+          <div class="clean-url-text mono" id="directCleanPreview"></div>
+        </div>
+
+        <div class="field-group">
+          <label class="field-label" for="directFileNameInput" id="directFileNameLabel">保存文件名</label>
+          <input type="text" id="directFileNameInput" class="text-input mono" placeholder="video.mp4" />
+        </div>
+
+        <button type="button" class="accordion-btn" id="directHeadersToggle">▸ 高级请求头 (Referer / Cookie 选填)</button>
+        <div class="headers-drawer hidden" id="directHeadersBox">
+          <div class="field-group">
+            <label class="field-label" for="directRefererInput">Referer</label>
+            <input type="text" id="directRefererInput" class="text-input mono" placeholder="https://..." />
+          </div>
+          <div class="field-group">
+            <label class="field-label" for="directCookieInput">Cookie</label>
+            <input type="text" id="directCookieInput" class="text-input mono" placeholder="key=value;" />
+          </div>
+        </div>
+
+        <div class="field-group">
+          <div class="field-label-row">
+            <span class="field-label" id="directThreadsLabel">并发线程数</span>
+            <span class="field-hint" id="directThreadsHint">HTTP Range 多分片提速</span>
+          </div>
+          <div class="thread-grid" id="directThreadSelector">
+            <button type="button" class="thread-pill" data-threads="4">4x</button>
+            <button type="button" class="thread-pill" data-threads="8">8x</button>
+            <button type="button" class="thread-pill active" data-threads="16">16x</button>
+            <button type="button" class="thread-pill" data-threads="32">32x</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="drawer-bottom-bar">
+        <button type="button" class="btn btn-subtle btn-thumb" id="directPasteBtn">📋 粘贴</button>
+        <button type="button" class="btn btn-blue-soft btn-thumb" id="directSniffBtn">🌐 网页嗅探</button>
+        <button type="button" class="btn btn-accent btn-thumb flex-1" id="directStartBtn">⬇ 下载</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal Sheet -->
+  <div class="sheet-modal hidden" id="settingsModal" role="dialog" aria-modal="true">
+    <div class="sheet-backdrop" id="settingsBackdrop"></div>
+    <div class="sheet-card">
+      <div class="drawer-handle"></div>
+      <div class="sheet-head">
+        <span class="drawer-title" id="settingsModalTitle">设置</span>
+        <button type="button" class="icon-close-mini" id="settingsCloseBtn">✕</button>
+      </div>
+
+      <div class="sheet-body">
+        <div class="setting-block">
+          <div class="setting-label" id="setLangLabel">界面语言 / Language</div>
+          <div class="segmented full-width" id="settingsLangSwitch">
+            <button type="button" class="seg-btn active" data-lang="zh">简体中文</button>
+            <button type="button" class="seg-btn" data-lang="en">English</button>
+          </div>
+        </div>
+
+        <div class="setting-block">
+          <div class="setting-label" id="setDefaultThreadsLabel">默认并发线程数</div>
+          <div class="thread-grid" id="defaultThreadsGrid">
+            <button type="button" class="thread-pill" data-threads="4">4</button>
+            <button type="button" class="thread-pill" data-threads="8">8</button>
+            <button type="button" class="thread-pill active" data-threads="16">16</button>
+            <button type="button" class="thread-pill" data-threads="32">32</button>
+          </div>
+        </div>
+
+        <div class="setting-block">
+          <div class="setting-label" id="setConcurrentLabel">同时运行任务上限</div>
+          <div class="thread-grid" id="concurrentLimitGrid">
+            <button type="button" class="thread-pill" data-limit="1">1</button>
+            <button type="button" class="thread-pill active" data-limit="2">2</button>
+            <button type="button" class="thread-pill" data-limit="3">3</button>
+            <button type="button" class="thread-pill" data-limit="5">5</button>
+          </div>
+        </div>
+
+        <div class="setting-block">
+          <div class="setting-label" id="setUaLabel">默认下载请求 UA</div>
+          <div class="segmented full-width" id="uaSwitch">
+            <button type="button" class="seg-btn active" data-ua="desktop" id="uaDesktopBtn">桌面 Chrome</button>
+            <button type="button" class="seg-btn" data-ua="mobile" id="uaMobileBtn">手机 Android</button>
+          </div>
+        </div>
+
+        <div class="setting-block save-path-box">
+          <div class="setting-label" id="setPathLabel">下载目录</div>
+          <div class="mono path-value">Download/JoelPhonePro/</div>
+          <div class="setting-note" id="setPathNote">遵循 Android 公共下载目录规范，系统相册和文件管理器直接可见。</div>
+        </div>
+
+        <div class="setting-block">
+          <button type="button" class="btn btn-danger-soft btn-thumb full-btn" id="clearBrowserCacheBtn">🧹 清除浏览器缓存与登录 Cookie</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="toast hidden" id="toast"></div>

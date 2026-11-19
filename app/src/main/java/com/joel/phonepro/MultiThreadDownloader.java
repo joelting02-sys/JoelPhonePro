@@ -209,6 +209,17 @@ public class MultiThreadDownloader {
         task.finalUrl = task.url;
         task.fileName = sanitizeFileName(fileName, inferFileNameFromUrl(task.url));
         task.threads = clampThreads(threads > 0 ? threads : defaultThreads);
+        task.rangeSupported = task.threads > 1;
+        if (task.threads > 1) {
+            task.chunkStarts = new long[task.threads];
+            task.chunkEnds = new long[task.threads];
+            task.chunkDownloaded = new long[task.threads];
+            for (int i = 0; i < task.threads; i++) {
+                task.chunkStarts[i] = 0L;
+                task.chunkEnds[i] = 99L;
+                task.chunkDownloaded[i] = 0L;
+            }
+        }
         task.referer = referer != null ? referer.trim() : "";
         task.cookie = cookie != null ? cookie.trim() : "";
         String mode = (uaMode != null && !uaMode.isEmpty()) ? uaMode : defaultUaMode;
@@ -478,7 +489,6 @@ public class MultiThreadDownloader {
     private HttpURLConnection openConnectionFollowRedirects(
             String rawUrl, String referer, String cookie, String userAgent, String rangeHeader) throws IOException {
         String currentUrl = rawUrl;
-        String initialHost = new URL(rawUrl).getHost();
 
         for (int redirect = 0; redirect < 6; redirect++) {
             HttpURLConnection conn = (HttpURLConnection) new URL(currentUrl).openConnection();
@@ -492,7 +502,7 @@ public class MultiThreadDownloader {
             if (referer != null && !referer.isEmpty()) {
                 conn.setRequestProperty("Referer", referer);
             }
-            if (cookie != null && !cookie.isEmpty() && initialHost.equalsIgnoreCase(conn.getURL().getHost())) {
+            if (cookie != null && !cookie.isEmpty()) {
                 conn.setRequestProperty("Cookie", cookie);
             }
             conn.setRequestProperty("Accept", "*/*");
@@ -521,6 +531,50 @@ public class MultiThreadDownloader {
         throw new IOException("Too many redirects");
     }
 
+    private void applyProbeHeaders(DownloadTask task, HttpURLConnection conn, boolean isSingleByteProbe) {
+        int code;
+        try {
+            code = conn.getResponseCode();
+        } catch (IOException e) {
+            return;
+        }
+        task.finalUrl = conn.getURL().toString();
+        String contentDisposition = conn.getHeaderField("Content-Disposition");
+        String serverName = extractFileNameFromDisposition(contentDisposition);
+        if (serverName != null && !serverName.isEmpty() && isGenericFileName(task.fileName)) {
+            task.fileName = sanitizeFileName(serverName, task.fileName);
+        }
+        String contentType = conn.getContentType();
+        if (contentType != null && !contentType.isEmpty()) {
+            int semi = contentType.indexOf(';');
+            String cleanMime = (semi > 0 ? contentType.substring(0, semi) : contentType).trim();
+            if (!cleanMime.isEmpty() && !"application/octet-stream".equalsIgnoreCase(cleanMime)) {
+                task.mimeType = cleanMime;
+            }
+        }
+
+        String acceptRanges = conn.getHeaderField("Accept-Ranges");
+        String contentRange = conn.getHeaderField("Content-Range");
+        long headerContentLength = parseLongHeader(conn.getHeaderField("Content-Length"));
+
+        if (code == 206) {
+            task.rangeSupported = true;
+            long totalFromRange = parseTotalFromContentRange(contentRange);
+            if (totalFromRange > 0) {
+                task.totalBytes = totalFromRange;
+            } else if (!isSingleByteProbe && headerContentLength > 0) {
+                task.totalBytes = headerContentLength;
+            } else if (headerContentLength > 1) {
+                task.totalBytes = headerContentLength;
+            }
+        } else {
+            if (headerContentLength > 0) {
+                task.totalBytes = headerContentLength;
+            }
+            task.rangeSupported = "bytes".equalsIgnoreCase(acceptRanges) && task.totalBytes > 0;
+        }
+    }
+
     private void probeRemote(DownloadTask task) throws IOException {
         HttpURLConnection conn = openConnectionFollowRedirects(
                 task.url, task.referer, task.cookie, task.userAgent, "bytes=0-0");
@@ -536,38 +590,7 @@ public class MultiThreadDownloader {
             if (code < 200 || code >= 400) {
                 throw new IOException("HTTP " + code + " " + conn.getResponseMessage());
             }
-
-            task.finalUrl = conn.getURL().toString();
-            String contentDisposition = conn.getHeaderField("Content-Disposition");
-            String serverName = extractFileNameFromDisposition(contentDisposition);
-            if (serverName != null && !serverName.isEmpty() && isGenericFileName(task.fileName)) {
-                task.fileName = sanitizeFileName(serverName, task.fileName);
-            }
-            String contentType = conn.getContentType();
-            if (contentType != null && !contentType.isEmpty()) {
-                int semi = contentType.indexOf(';');
-                String cleanMime = (semi > 0 ? contentType.substring(0, semi) : contentType).trim();
-                if (!cleanMime.isEmpty() && !"application/octet-stream".equalsIgnoreCase(cleanMime)) {
-                    task.mimeType = cleanMime;
-                }
-            }
-
-            String acceptRanges = conn.getHeaderField("Accept-Ranges");
-            String contentRange = conn.getHeaderField("Content-Range");
-            long headerContentLength = parseLongHeader(conn.getHeaderField("Content-Length"));
-
-            if (code == 206) {
-                task.rangeSupported = true;
-                long totalFromRange = parseTotalFromContentRange(contentRange);
-                if (totalFromRange > 0) {
-                    task.totalBytes = totalFromRange;
-                } else if (headerContentLength > 1) {
-                    task.totalBytes = headerContentLength;
-                }
-            } else {
-                task.totalBytes = headerContentLength;
-                task.rangeSupported = "bytes".equalsIgnoreCase(acceptRanges) && task.totalBytes > 0;
-            }
+            applyProbeHeaders(task, conn, true);
         } finally {
             try {
                 InputStream in = conn.getInputStream();
@@ -575,6 +598,24 @@ public class MultiThreadDownloader {
             } catch (Exception ignored) {
             }
             conn.disconnect();
+        }
+
+        // Fallback probe with Range: bytes=0- if server returned 206 without total in Content-Range
+        if (task.totalBytes <= 0) {
+            HttpURLConnection openEndedConn = null;
+            try {
+                openEndedConn = openConnectionFollowRedirects(
+                        task.url, task.referer, task.cookie, task.userAgent, "bytes=0-");
+                int fallbackCode = openEndedConn.getResponseCode();
+                if (fallbackCode >= 200 && fallbackCode < 400) {
+                    applyProbeHeaders(task, openEndedConn, false);
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (openEndedConn != null) {
+                    openEndedConn.disconnect();
+                }
+            }
         }
     }
 
@@ -602,6 +643,7 @@ public class MultiThreadDownloader {
             }
             task.downloadedBytes = 0L;
         }
+        notifyUpdated();
 
         final RandomAccessFile raf = new RandomAccessFile(tempFile, "rw");
         raf.setLength(task.totalBytes);

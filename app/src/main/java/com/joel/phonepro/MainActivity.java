@@ -6,18 +6,22 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.text.InputType;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
@@ -36,6 +40,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -101,13 +106,15 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     private WebView mainWebView;
     private MultiThreadDownloader downloader;
 
-    // Native Web Media Sniffer overlay + Multi-window OAuth Popup
+    // Native Web Media Sniffer overlay + Floating Download FAB + Multi-window OAuth Popup
     private LinearLayout snifferOverlay;
+    private ProgressBar snifferProgressBar;
     private FrameLayout snifferWebContainer;
     private WebView snifferWebView;
     private EditText snifferUrlInput;
     private Button snifferUaBtn;
-    private TextView snifferCountBadge;
+    private FrameLayout rlDownloadFab;
+    private TextView fabCircleBtn;
     private LinearLayout popupOverlay;
     private TextView popupTitleView;
     private FrameLayout popupWebSlot;
@@ -120,6 +127,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     private final Map<String, SniffedResource> sniffedByUrl = new HashMap<String, SniffedResource>();
     private final AtomicInteger sniffIdSeq = new AtomicInteger(0);
     private final ExecutorService probeExecutor = Executors.newFixedThreadPool(3);
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
 
     private LocalPreviewProxy previewProxy;
     private volatile int previewProxyPort = 0;
@@ -128,6 +136,19 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     private volatile String pendingSharedText = "";
     private volatile String currentSniffPageUrl = "";
     private volatile boolean snifferUseMobileUa = true;
+    private volatile boolean browserHasPageLoaded = false;
+    private volatile boolean browserShowingInTab1 = false;
+    private volatile boolean downloadDrawerOpen = false;
+    private volatile String currentBottomTab = "browser";
+    private volatile boolean fabScanningState = false;
+    private volatile String latestNetVideoUrl = "";
+    private volatile String latestNetVideoReferer = "";
+    private volatile String latestNetVideoCookie = "";
+    private volatile long lastNetRescanAt = 0L;
+    private volatile String currentActiveVideoKey = "";
+    private volatile String currentActiveVideoTitle = "";
+    private volatile String currentActiveCoverUrl = "";
+    private volatile double currentActiveDurationSec = -1.0;
 
     private static class SniffedResource {
         final String id;
@@ -139,6 +160,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         volatile String source;
         volatile String mediaType;
         volatile String title;
+        volatile String qualityLabel;
+        volatile String coverUrl;
         volatile String contentType;
         volatile String suggestedName;
         volatile long sizeBytes;
@@ -169,6 +192,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             this.source = source;
             this.mediaType = mediaType;
             this.title = title;
+            this.qualityLabel = "";
+            this.coverUrl = "";
             this.contentType = "";
             this.suggestedName = "";
             this.sizeBytes = -1L;
@@ -188,6 +213,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             obj.put("source", source != null ? source : "NET");
             obj.put("mediaType", mediaType != null ? mediaType : "video");
             obj.put("title", title != null ? title : "");
+            obj.put("qualityLabel", qualityLabel != null ? qualityLabel : "");
+            obj.put("coverUrl", coverUrl != null ? coverUrl : "");
             obj.put("contentType", contentType != null ? contentType : "");
             obj.put("suggestedName", suggestedName != null ? suggestedName : "");
             obj.put("sizeBytes", sizeBytes);
@@ -224,6 +251,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         applySystemBarInsets();
 
         mainWebView = new WebView(this);
+        mainWebView.setBackgroundColor(Color.TRANSPARENT);
         WebSettings ws = mainWebView.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
@@ -248,9 +276,11 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         buildSnifferOverlay();
-        rootLayout.addView(snifferOverlay, new FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams snifferLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT));
+                ViewGroup.LayoutParams.MATCH_PARENT);
+        snifferLp.bottomMargin = dp(60);
+        rootLayout.addView(snifferOverlay, snifferLp);
 
         setContentView(rootLayout);
         configureSystemBarAppearance();
@@ -391,43 +421,72 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         s.setDatabaseEnabled(true);
         s.setJavaScriptCanOpenWindowsAutomatically(true);
         s.setSupportMultipleWindows(true);
-        s.setUseWideViewPort(true);
-        s.setLoadWithOverviewMode(true);
+        s.setUseWideViewPort(!useMobile);
+        s.setLoadWithOverviewMode(!useMobile);
         s.setMediaPlaybackRequiresUserGesture(false);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
         s.setUserAgentString(useMobile ? mobileUa : desktopUa);
     }
 
-    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
+    @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface", "ClickableViewAccessibility"})
     private void buildSnifferOverlay() {
         snifferOverlay = new LinearLayout(this);
         snifferOverlay.setOrientation(LinearLayout.VERTICAL);
         snifferOverlay.setBackgroundColor(Color.WHITE);
         snifferOverlay.setVisibility(View.GONE);
 
-        // Bottom-Docked Thumb Toolbar
+        // Top thin webpage loading progress bar
+        snifferProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        snifferProgressBar.setMax(100);
+        snifferProgressBar.setProgress(0);
+        snifferProgressBar.setProgressTintList(ColorStateList.valueOf(Color.parseColor("#FF3366")));
+        snifferProgressBar.setProgressBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#E2E8F0")));
+        snifferProgressBar.setVisibility(View.GONE);
+
+        // Bottom Browser Control Bar (Thumb Zone, sits right above the 60dp Bottom Navigation Bar)
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(10), dp(8), dp(10), dp(8));
-        bar.setBackgroundColor(Color.WHITE);
+        bar.setPadding(dp(8), dp(6), dp(8), dp(6));
+        bar.setBackgroundColor(Color.parseColor("#F8FAFC"));
 
-        Button closeBtn = new Button(this);
-        closeBtn.setText("←");
-        closeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-        closeBtn.setTextColor(Color.parseColor("#0F172A"));
-        closeBtn.setBackground(pillBg("#F3F4F6", 12));
-        closeBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(40), dp(42));
-        closeLp.rightMargin = dp(6);
-        closeBtn.setOnClickListener(new View.OnClickListener() {
+        Button homeBtn = new Button(this);
+        homeBtn.setText("🏠");
+        homeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        homeBtn.setTextColor(Color.parseColor("#0F172A"));
+        homeBtn.setBackground(pillBg("#FFFFFF", 10));
+        homeBtn.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams homeLp = new LinearLayout.LayoutParams(dp(38), dp(40));
+        homeLp.rightMargin = dp(5);
+        homeBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 triggerHaptic();
-                closeSnifferOverlay();
+                minimizeBrowserToHome();
             }
         });
-        bar.addView(closeBtn, closeLp);
+        bar.addView(homeBtn, homeLp);
+
+        Button backBtn = new Button(this);
+        backBtn.setText("◀");
+        backBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        backBtn.setTextColor(Color.parseColor("#0F172A"));
+        backBtn.setBackground(pillBg("#FFFFFF", 10));
+        backBtn.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(dp(38), dp(40));
+        backLp.rightMargin = dp(5);
+        backBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                triggerHaptic();
+                if (snifferWebView != null && snifferWebView.canGoBack()) {
+                    snifferWebView.goBack();
+                } else {
+                    minimizeBrowserToHome();
+                }
+            }
+        });
+        bar.addView(backBtn, backLp);
 
         snifferUrlInput = new EditText(this);
         snifferUrlInput.setSingleLine(true);
@@ -435,31 +494,31 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         snifferUrlInput.setImeOptions(EditorInfo.IME_ACTION_GO);
         snifferUrlInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         snifferUrlInput.setTextColor(Color.parseColor("#0F172A"));
-        snifferUrlInput.setHint("https://...");
-        snifferUrlInput.setPadding(dp(10), dp(6), dp(10), dp(6));
-        snifferUrlInput.setBackground(pillBg("#F8F9FA", 12));
+        snifferUrlInput.setHint("搜索或输入网址...");
+        snifferUrlInput.setPadding(dp(10), dp(4), dp(10), dp(4));
+        snifferUrlInput.setBackground(pillBg("#FFFFFF", 10));
         snifferUrlInput.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
             public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
                 if (actionId == EditorInfo.IME_ACTION_GO || actionId == EditorInfo.IME_ACTION_DONE) {
-                    loadSnifferUrl(snifferUrlInput.getText().toString());
+                    loadSnifferUrl(snifferUrlInput.getText().toString(), true);
                     return true;
                 }
                 return false;
             }
         });
-        LinearLayout.LayoutParams urlLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
-        urlLp.rightMargin = dp(6);
+        LinearLayout.LayoutParams urlLp = new LinearLayout.LayoutParams(0, dp(40), 1f);
+        urlLp.rightMargin = dp(5);
         bar.addView(snifferUrlInput, urlLp);
 
         Button pasteBtn = new Button(this);
         pasteBtn.setText("📋");
-        pasteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+        pasteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         pasteBtn.setTextColor(Color.parseColor("#0F172A"));
-        pasteBtn.setBackground(pillBg("#F3F4F6", 12));
+        pasteBtn.setBackground(pillBg("#FFFFFF", 10));
         pasteBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(dp(40), dp(42));
-        pasteLp.rightMargin = dp(6);
+        LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(dp(38), dp(40));
+        pasteLp.rightMargin = dp(5);
         pasteBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -468,7 +527,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 String clean = extractCleanUrlFromText(clip);
                 if (!clean.isEmpty()) {
                     Toast.makeText(MainActivity.this, "已自动提取并加载链接", Toast.LENGTH_SHORT).show();
-                    loadSnifferUrl(clean);
+                    loadSnifferUrl(clean, true);
                 } else {
                     Toast.makeText(MainActivity.this, "剪贴板未检测到链接", Toast.LENGTH_SHORT).show();
                 }
@@ -479,11 +538,11 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         snifferUaBtn = new Button(this);
         snifferUaBtn.setText("📱");
         snifferUaBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        snifferUaBtn.setTextColor(Color.parseColor("#1D4ED8"));
-        snifferUaBtn.setBackground(pillBg("#EFF6FF", 12));
+        snifferUaBtn.setTextColor(Color.parseColor("#067EFF"));
+        snifferUaBtn.setBackground(pillBg("#EFF6FF", 10));
         snifferUaBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams uaLp = new LinearLayout.LayoutParams(dp(40), dp(42));
-        uaLp.rightMargin = dp(6);
+        LinearLayout.LayoutParams uaLp = new LinearLayout.LayoutParams(dp(38), dp(40));
+        uaLp.rightMargin = dp(5);
         snifferUaBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -500,46 +559,34 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         });
         bar.addView(snifferUaBtn, uaLp);
 
-        Button scanNowBtn = new Button(this);
-        scanNowBtn.setText("🔍");
-        scanNowBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-        scanNowBtn.setTextColor(Color.parseColor("#1D4ED8"));
-        scanNowBtn.setBackground(pillBg("#EFF6FF", 12));
-        scanNowBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(40), dp(42));
-        scanLp.rightMargin = dp(6);
-        scanNowBtn.setOnClickListener(new View.OnClickListener() {
+        Button refreshBtn = new Button(this);
+        refreshBtn.setText("🔄");
+        refreshBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        refreshBtn.setTextColor(Color.parseColor("#067EFF"));
+        refreshBtn.setBackground(pillBg("#EFF6FF", 10));
+        refreshBtn.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(38), dp(40));
+        refreshBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 triggerHaptic();
-                Toast.makeText(MainActivity.this, "正在扫描本页视频与图片…", Toast.LENGTH_SHORT).show();
+                fabScanningState = true;
+                updateFloatingFabUi(false);
                 injectDomMediaScanner(snifferWebView, true);
+                Toast.makeText(MainActivity.this, "正在重新嗅探本页媒体…", Toast.LENGTH_SHORT).show();
+                uiHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        fabScanningState = false;
+                        updateFloatingFabUi(false);
+                    }
+                }, 1200L);
             }
         });
-        bar.addView(scanNowBtn, scanLp);
-
-        snifferCountBadge = new TextView(this);
-        snifferCountBadge.setText("0");
-        snifferCountBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-        snifferCountBadge.setTypeface(Typeface.DEFAULT_BOLD);
-        snifferCountBadge.setTextColor(Color.WHITE);
-        snifferCountBadge.setGravity(Gravity.CENTER);
-        snifferCountBadge.setPadding(dp(11), dp(4), dp(11), dp(4));
-        snifferCountBadge.setBackground(pillBg("#2563EB", 14));
-        snifferCountBadge.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                triggerHaptic();
-                closeSnifferOverlay();
-                mainWebView.evaluateJavascript("window.switchTab && window.switchTab('sniffer');", null);
-            }
-        });
-        LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(42));
-        bar.addView(snifferCountBadge, badgeLp);
+        bar.addView(refreshBtn, scanLp);
 
         View divider = new View(this);
-        divider.setBackgroundColor(Color.parseColor("#E5E7EB"));
+        divider.setBackgroundColor(Color.parseColor("#E2E8F0"));
 
         snifferWebContainer = new FrameLayout(this);
 
@@ -550,6 +597,18 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         snifferWebView.addJavascriptInterface(new JoelSniffHook(), "JoelSniffHook");
 
         snifferWebView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onProgressChanged(WebView view, int newProgress) {
+                if (snifferProgressBar != null) {
+                    if (newProgress >= 100) {
+                        snifferProgressBar.setVisibility(View.GONE);
+                    } else {
+                        snifferProgressBar.setVisibility(View.VISIBLE);
+                        snifferProgressBar.setProgress(newProgress);
+                    }
+                }
+            }
+
             @Override
             public boolean onCreateWindow(
                     WebView view,
@@ -586,6 +645,15 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 }
                 CookieManager.getInstance().flush();
                 injectDomMediaScanner(view, true);
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        mainWebView.evaluateJavascript(
+                                "window.onBrowserPageChanged && window.onBrowserPageChanged("
+                                        + JSONObject.quote(url != null ? url : "") + ");",
+                                null);
+                    }
+                });
             }
 
             @Override
@@ -596,27 +664,52 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     String secFetchDest = getHeaderIgnoreCase(hdrs, "sec-fetch-dest");
                     String accept = getHeaderIgnoreCase(hdrs, "accept");
                     String mediaType = detectSniffTypeFromRequest(reqUrl, secFetchDest, accept);
-                    if (mediaType != null) {
+                    if ("video".equals(mediaType)) {
                         String headerRef = getHeaderIgnoreCase(hdrs, "referer");
                         String pageUrl = !headerRef.isEmpty()
                                 ? headerRef
                                 : (currentSniffPageUrl != null ? currentSniffPageUrl : "");
-                        String cookies = resolveCookiesForUrl(reqUrl, pageUrl);
-                        reportSniffedResource(
-                                reqUrl,
-                                pageUrl,
-                                cookies,
-                                "NET",
-                                mediaType,
-                                "",
-                                0,
-                                0,
-                                -1.0);
+                        latestNetVideoUrl = reqUrl;
+                        latestNetVideoReferer = pageUrl;
+                        latestNetVideoCookie = resolveCookiesForUrl(reqUrl, pageUrl);
+
+                        boolean needsUpgrade = false;
+                        synchronized (sniffLock) {
+                            if (sniffedById.isEmpty()) {
+                                needsUpgrade = true;
+                            } else {
+                                boolean allFallback = true;
+                                for (SniffedResource r : sniffedById.values()) {
+                                    if (r.url == null || !r.url.contains("iesdouyin.com/aweme/v1/play")) {
+                                        allFallback = false;
+                                        break;
+                                    }
+                                }
+                                needsUpgrade = allFallback;
+                            }
+                        }
+                        if (needsUpgrade && isRealVideoCdnUrl(reqUrl)) {
+                            long now = System.currentTimeMillis();
+                            if (now - lastNetRescanAt > 400L) {
+                                lastNetRescanAt = now;
+                                uiHandler.postDelayed(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (snifferWebView != null) {
+                                            injectDomMediaScanner(snifferWebView, false);
+                                        }
+                                    }
+                                }, 250L);
+                            }
+                        }
                     }
                 }
                 return super.shouldInterceptRequest(view, request);
             }
         });
+
+        // Native Draggable Floating Download FAB (Video Downloader rl_download_fab signature)
+        rlDownloadFab = buildFloatingDownloadFab();
 
         // Multi-window OAuth Popup container (e.g. Sign in with Google on X)
         popupOverlay = new LinearLayout(this);
@@ -668,15 +761,252 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
 
         snifferWebContainer.addView(snifferWebView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
+        FrameLayout.LayoutParams fabLp = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        fabLp.gravity = Gravity.BOTTOM | Gravity.END;
+        fabLp.rightMargin = dp(14);
+        fabLp.bottomMargin = dp(14);
+        snifferWebContainer.addView(rlDownloadFab, fabLp);
+
         snifferWebContainer.addView(popupOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        snifferOverlay.addView(snifferProgressBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(3)));
         snifferOverlay.addView(snifferWebContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
         snifferOverlay.addView(divider, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
         snifferOverlay.addView(bar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        updateFloatingFabUi(false);
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private FrameLayout buildFloatingDownloadFab() {
+        final FrameLayout wrap = new FrameLayout(this);
+
+        fabCircleBtn = new TextView(this);
+        fabCircleBtn.setText("⬇");
+        fabCircleBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+        fabCircleBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        fabCircleBtn.setTextColor(Color.WHITE);
+        fabCircleBtn.setGravity(Gravity.CENTER);
+        fabCircleBtn.setElevation(dp(8));
+        wrap.addView(fabCircleBtn, new FrameLayout.LayoutParams(dp(56), dp(56)));
+
+        wrap.setOnTouchListener(new View.OnTouchListener() {
+            float downRawX;
+            float downRawY;
+            float startTx;
+            float startTy;
+            boolean dragging;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                switch (event.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downRawX = event.getRawX();
+                        downRawY = event.getRawY();
+                        startTx = v.getTranslationX();
+                        startTy = v.getTranslationY();
+                        dragging = false;
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        float dx = event.getRawX() - downRawX;
+                        float dy = event.getRawY() - downRawY;
+                        if (Math.hypot(dx, dy) >= dp(8)) {
+                            dragging = true;
+                        }
+                        if (dragging && snifferWebContainer != null) {
+                            float minTx = -(snifferWebContainer.getWidth() - v.getWidth() - dp(24));
+                            float maxTx = dp(6);
+                            float minTy = -(snifferWebContainer.getHeight() - v.getHeight() - dp(24));
+                            float maxTy = dp(6);
+                            float nextTx = Math.max(minTx, Math.min(maxTx, startTx + dx));
+                            float nextTy = Math.max(minTy, Math.min(maxTy, startTy + dy));
+                            v.setTranslationX(nextTx);
+                            v.setTranslationY(nextTy);
+                        }
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        if (!dragging) {
+                            onFloatingDownloadFabClicked();
+                        }
+                        return true;
+                    default:
+                        return false;
+                }
+            }
+        });
+        return wrap;
+    }
+
+    private int getValidSniffCount() {
+        synchronized (sniffLock) {
+            return sniffedById.size();
+        }
+    }
+
+    private void updateFloatingFabUi(final boolean pulse) {
+        if (fabCircleBtn == null) return;
+        final int validCount = getValidSniffCount();
+        if (validCount > 0) {
+            fabCircleBtn.setBackground(circleBg("#FF3366", "#FFFFFF", 2));
+            fabCircleBtn.setText("⬇");
+            if (pulse) {
+                fabCircleBtn.animate().cancel();
+                fabCircleBtn.animate()
+                        .scaleX(1.16f)
+                        .scaleY(1.16f)
+                        .setDuration(140)
+                        .withEndAction(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (fabCircleBtn != null) {
+                                    fabCircleBtn.animate().scaleX(1f).scaleY(1f).setDuration(140).start();
+                                }
+                            }
+                        })
+                        .start();
+            }
+        } else if (fabScanningState) {
+            fabCircleBtn.setBackground(circleBg("#067EFF", "#FFFFFF", 2));
+            fabCircleBtn.setText("⏳");
+        } else {
+            fabCircleBtn.setBackground(circleBg("#64748B", "#E2E8F0", 2));
+            fabCircleBtn.setText("⬇");
+        }
+    }
+
+    private void onFloatingDownloadFabClicked() {
+        triggerHaptic();
+        if (snifferWebView != null) {
+            injectDomMediaScanner(snifferWebView, false);
+        }
+        if (getValidSniffCount() > 0) {
+            openDownloadDrawerFromBrowser();
+            return;
+        }
+        fabScanningState = true;
+        updateFloatingFabUi(false);
+        if (snifferWebView != null) {
+            injectDomMediaScanner(snifferWebView, true);
+        }
+        uiHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                fabScanningState = false;
+                updateFloatingFabUi(false);
+                if (getValidSniffCount() > 0) {
+                    openDownloadDrawerFromBrowser();
+                } else if (promoteLatestNetVideoAsActiveGroup()) {
+                    openDownloadDrawerFromBrowser();
+                } else {
+                    Toast.makeText(
+                            MainActivity.this,
+                            "请先播放要下载的视频，按钮变红后点击选画质下载",
+                            Toast.LENGTH_SHORT).show();
+                }
+            }
+        }, 1100L);
+    }
+
+    private void openDownloadDrawerFromBrowser() {
+        downloadDrawerOpen = true;
+        if (snifferWebView != null) {
+            snifferWebView.evaluateJavascript(
+                    "document.querySelectorAll('video,audio').forEach(function(e){try{e.pause();}catch(_){}});",
+                    null);
+        }
+        mainWebView.bringToFront();
+        if (rootLayout != null) {
+            rootLayout.requestLayout();
+            rootLayout.invalidate();
+        }
+        mainWebView.evaluateJavascript("window.openDownloadDrawer && window.openDownloadDrawer();", null);
+    }
+
+    private boolean isRealVideoCdnUrl(String url) {
+        if (url == null) return false;
+        String lower = url.toLowerCase(Locale.ROOT);
+        return lower.contains("douyinvod.com")
+                || lower.contains("zjcdn.com")
+                || lower.contains("bytevcloudcdn.com")
+                || lower.contains("bilivideo.com")
+                || lower.contains("video.twimg.com")
+                || lower.contains(".mp4");
+    }
+
+    private boolean isFallbackPlayUrl(String url) {
+        return url != null && url.contains("iesdouyin.com/aweme/v1/play");
+    }
+
+    private java.util.List<SniffedResource> expandSingleVariantToQualityTiers(SniffedResource base) {
+        java.util.List<SniffedResource> expanded = new java.util.ArrayList<SniffedResource>();
+        String[] labels = new String[]{"1080P 超清", "720P 高清", "540P 标清"};
+        int[] widths = new int[]{base.width > 0 ? base.width : 1080, 720, 540};
+        int[] heights = new int[]{base.height > 0 ? base.height : 1920, 1280, 960};
+        for (int i = 0; i < labels.length; i++) {
+            String id = (i == 0 && base.id != null && !base.id.isEmpty())
+                    ? base.id
+                    : ("sniff_" + sniffIdSeq.incrementAndGet());
+            SniffedResource tier = new SniffedResource(
+                    id,
+                    base.url,
+                    base.referer,
+                    base.cookie,
+                    base.userAgent,
+                    base.uaMode,
+                    base.source,
+                    "video",
+                    base.title,
+                    widths[i],
+                    heights[i],
+                    base.durationSec);
+            tier.qualityLabel = labels[i];
+            tier.coverUrl = base.coverUrl;
+            tier.contentType = base.contentType;
+            tier.suggestedName = base.suggestedName;
+            if (i == 0 && base.sizeBytes > 0) {
+                tier.sizeBytes = base.sizeBytes;
+            }
+            expanded.add(tier);
+        }
+        return expanded;
+    }
+
+    private boolean promoteLatestNetVideoAsActiveGroup() {
+        String netUrl = latestNetVideoUrl;
+        if (netUrl == null || !netUrl.startsWith("http")
+                || isIgnoredStaticAsset(netUrl.toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+        String pageUrl = (latestNetVideoReferer != null && !latestNetVideoReferer.isEmpty())
+                ? latestNetVideoReferer
+                : (currentSniffPageUrl != null ? currentSniffPageUrl : "");
+        String cookies = (latestNetVideoCookie != null && !latestNetVideoCookie.isEmpty())
+                ? latestNetVideoCookie
+                : resolveCookiesForUrl(netUrl, pageUrl);
+        String activeUaMode = snifferUseMobileUa ? "mobile" : "desktop";
+        String activeUa = snifferUseMobileUa ? mobileUa : desktopUa;
+        String title = (currentActiveVideoTitle != null && !currentActiveVideoTitle.isEmpty())
+                ? currentActiveVideoTitle
+                : "当前播放视频";
+        String cover = currentActiveCoverUrl != null ? currentActiveCoverUrl : "";
+        double dur = currentActiveDurationSec;
+
+        SniffedResource base = new SniffedResource(
+                "sniff_" + sniffIdSeq.incrementAndGet(),
+                netUrl, pageUrl, cookies, activeUa, activeUaMode,
+                "NET", "video", title, 1080, 1920, dur);
+        base.coverUrl = cover;
+        java.util.List<SniffedResource> variants = expandSingleVariantToQualityTiers(base);
+        String vKey = "net:" + netUrl.split("\\?")[0];
+        publishActiveVideoGroup(vKey, title, cover, dur, variants);
+        return true;
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -777,195 +1107,220 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         return "";
     }
 
-    private void injectDomMediaScanner(final WebView view, final boolean forceHtmlScan) {
+    private void injectDomMediaScanner(final WebView view, final boolean forceScan) {
         if (view == null) return;
         final String js = "(function(){"
-                + "if(!window.__joelSentUrls){window.__joelSentUrls={};}"
-                + "var forceHtml=" + (forceHtmlScan ? "true" : "false") + ";"
-                + "function isIgnoredUrl(u){"
-                + "return /(avatar|icon|emoji|logo|favicon|qrcode|100x100|c50x50|c60x60|\\.svg)/i.test(u);"
-                + "}"
-                + "function isTwitterInitChunk(u){"
+                + "if(!window.__joelCatalog){window.__joelCatalog={byId:{},items:[]};}"
+                + "function cleanText(s){return String(s||'').replace(/\\s+/g,' ').trim();}"
+                + "function isBadStreamUrl(u){"
+                + "if(!u||typeof u!=='string'||u.indexOf('http')!==0)return true;"
                 + "var l=u.toLowerCase();"
-                + "if(l.indexOf('video.twimg.com')>=0&&(l.indexOf('/aud/')>=0||l.indexOf('/0/0/')>=0||l.indexOf('init.mp4')>=0||l.indexOf('.m4s')>=0))return true;"
+                + "if(l.indexOf('bytednsdoc.com')>=0||l.indexOf('bytegoofy.com')>=0||l.indexOf('bytescm.com')>=0||l.indexOf('lf3-static')>=0||l.indexOf('lf1-cdn-tos')>=0)return true;"
+                + "if(l.indexOf('media-audio-')>=0||l.indexOf('/aud/')>=0||l.indexOf('/0/0/')>=0||l.indexOf('init.mp4')>=0||l.indexOf('.m4s')>=0)return true;"
+                + "if(/\\.(mp3|m4a|aac|wav|flac|ogg|jpg|jpeg|png|webp|gif|svg|css|js)(\\?|$)/i.test(l))return true;"
                 + "return false;"
                 + "}"
-                + "function sendMedia(u,kind,title,w,h,dur){"
-                + "if(!u||u.indexOf('http')!==0)return;"
-                + "if(isTwitterInitChunk(u))return;"
-                + "var key=kind+':'+u;"
-                + "if(window.__joelSentUrls[key])return;"
-                + "window.__joelSentUrls[key]=1;"
-                + "if(window.JoelSniffHook){window.JoelSniffHook.onDomMedia(u,kind,title||'',w||0,h||0,dur>=0?dur:-1);}"
+                + "function isDirectCdnUrl(u){"
+                + "var l=String(u||'').toLowerCase();"
+                + "return l.indexOf('douyinvod.com')>=0||l.indexOf('zjcdn.com')>=0||l.indexOf('bytevcloudcdn.com')>=0||l.indexOf('bilivideo.com')>=0||l.indexOf('video.twimg.com')>=0;"
                 + "}"
-                + "function sendImage(u,title,w,h){"
-                + "if(!u||u.indexOf('http')!==0)return;"
-                + "if(isIgnoredUrl(u))return;"
-                + "var key='img:'+u;"
-                + "if(window.__joelSentUrls[key])return;"
-                + "window.__joelSentUrls[key]=1;"
-                + "if(window.JoelSniffHook){window.JoelSniffHook.onDomImage(u,title||'',w||0,h||0);}"
+                + "function pickBestCdnUrl(list){"
+                + "if(!Array.isArray(list))return '';"
+                + "for(var i=0;i<list.length;i++){var u=list[i];if(!isBadStreamUrl(u)&&isDirectCdnUrl(u)&&u.toLowerCase().indexOf('media-video-')<0)return u;}"
+                + "for(var j=0;j<list.length;j++){var u2=list[j];if(!isBadStreamUrl(u2)&&isDirectCdnUrl(u2))return u2;}"
+                + "for(var k=0;k<list.length;k++){var u3=list[k];if(!isBadStreamUrl(u3)&&u3.indexOf('aweme/v1/play')<0)return u3;}"
+                + "for(var m=0;m<list.length;m++){if(!isBadStreamUrl(list[m]))return list[m];}"
+                + "return '';"
                 + "}"
-                + "function scanStructuredNode(root,fallbackTitle){"
+                + "function normKey(u){return String(u||'').split('?')[0];}"
+                + "function labelForHeight(h,gear){"
+                + "var g=String(gear||'').toLowerCase();"
+                + "if(h>=2160||g.indexOf('4k')>=0)return '4K';"
+                + "if(h>=1080||g.indexOf('1080')>=0)return '1080P';"
+                + "if(h>=720||g.indexOf('720')>=0)return '720P';"
+                + "if(h>=540||g.indexOf('540')>=0)return '540P';"
+                + "if(h>=480||g.indexOf('480')>=0)return '480P';"
+                + "if(h>=360||g.indexOf('360')>=0)return '360P';"
+                + "return h>0?(h+'P'):'高清';"
+                + "}"
+                + "function addVariantUnique(list,seenTier,seenUrl,label,url,w,h,sz){"
+                + "if(isBadStreamUrl(url))return;"
+                + "var cu=url.replace('/playwm/','/play/');"
+                + "if(seenUrl[cu])return;"
+                + "var tier=label||'高清';"
+                + "if(seenTier[tier])return;"
+                + "seenUrl[cu]=1;seenTier[tier]=1;"
+                + "list.push({label:tier,url:cu,width:w||0,height:h||0,sizeBytes:sz||0});"
+                + "}"
+                + "function upsertCatalogEntry(id,title,cover,durSec,variants){"
+                + "if(!variants||!variants.length)return;"
+                + "var k=id||('cap:'+cleanText(title).slice(0,24));"
+                + "if(!k)return;"
+                + "var entry={id:k,title:cleanText(title),cover:cover||'',durationSec:durSec>0?durSec:-1,variants:variants};"
+                + "window.__joelCatalog.byId[k]=entry;"
+                + "for(var i=0;i<variants.length;i++){window.__joelCatalog.byId['u:'+normKey(variants[i].url)]=entry;}"
+                + "if(entry.title&&entry.title.length>=4){window.__joelCatalog.byId['t:'+entry.title.slice(0,16)]=entry;}"
+                + "var replaced=false;"
+                + "for(var j=0;j<window.__joelCatalog.items.length;j++){if(window.__joelCatalog.items[j].id===k){window.__joelCatalog.items[j]=entry;replaced=true;break;}}"
+                + "if(!replaced){window.__joelCatalog.items.push(entry);if(window.__joelCatalog.items.length>60)window.__joelCatalog.items.shift();}"
+                + "}"
+                + "function indexStructuredNode(root,fallbackTitle){"
                 + "if(!root||typeof root!=='object')return;"
-                + "var queue=[{obj:root,depth:0,title:fallbackTitle}];"
-                + "var visited=0;"
-                + "while(queue.length&&visited<2500){"
-                + "var cur=queue.shift();var o=cur.obj;var d=cur.depth;var ttl=cur.title;"
-                + "if(!o||typeof o!=='object'||d>12)continue;"
-                + "visited++;"
+                + "var q=[{obj:root,depth:0,title:fallbackTitle||''}];var vis=0;"
+                + "while(q.length&&vis<5000){"
+                + "var cur=q.shift();var o=cur.obj;var d=cur.depth;var ttl=cur.title;"
+                + "if(!o||typeof o!=='object'||d>18)continue;vis++;"
                 + "if(typeof o.desc==='string'&&o.desc.trim())ttl=o.desc.trim();"
                 + "else if(typeof o.item_title==='string'&&o.item_title.trim())ttl=o.item_title.trim();"
                 + "else if(typeof o.full_text==='string'&&o.full_text.trim())ttl=o.full_text.trim();"
-                + "else if(typeof o.text==='string'&&o.text.trim())ttl=o.text.trim();"
                 + "else if(o.legacy&&typeof o.legacy.full_text==='string'&&o.legacy.full_text.trim())ttl=o.legacy.full_text.trim();"
+                + "if(o.video&&typeof o.video==='object'&&((o.video.play_addr&&typeof o.video.play_addr==='object')||(o.video.play_addr_h264&&typeof o.video.play_addr_h264==='object')||Array.isArray(o.video.bit_rate))){"
+                + "var vid=String(o.aweme_id||o.awemeId||o.id||'');"
+                + "var v=o.video;var dur=Number(v.duration||o.duration||0);"
+                + "if(dur>1000)dur=dur/1000;else if(!isFinite(dur)||dur<=0)dur=-1;"
+                + "var cov=(v.cover&&Array.isArray(v.cover.url_list)&&v.cover.url_list[0])||(v.origin_cover&&Array.isArray(v.origin_cover.url_list)&&v.origin_cover.url_list[0])||'';"
+                + "var vars=[];var sTier={};var sUrl={};"
+                + "if(v.play_addr_h264&&Array.isArray(v.play_addr_h264.url_list)){"
+                + "var h264U=pickBestCdnUrl(v.play_addr_h264.url_list);"
+                + "if(h264U){addVariantUnique(vars,sTier,sUrl,labelForHeight(Number(v.play_addr_h264.height||v.height||0),''),h264U,Number(v.play_addr_h264.width||v.width||0),Number(v.play_addr_h264.height||v.height||0),Number(v.play_addr_h264.data_size||0));}"
+                + "}"
+                + "if(Array.isArray(v.bit_rate)){"
+                + "var sortedBr=v.bit_rate.slice().sort(function(a,b){"
+                + "var ah=Number((a.play_addr&&a.play_addr.height)||0);var bh=Number((b.play_addr&&b.play_addr.height)||0);"
+                + "if(bh!==ah)return bh-ah;"
+                + "return Number(b.bit_rate||0)-Number(a.bit_rate||0);"
+                + "});"
+                + "for(var bi=0;bi<sortedBr.length;bi++){"
+                + "var br=sortedBr[bi];var bpa=br&&br.play_addr;if(!bpa||!Array.isArray(bpa.url_list))continue;"
+                + "var vh=Number(bpa.height||0);var vw=Number(bpa.width||0);var vsz=Number(bpa.data_size||0);"
+                + "var picked=pickBestCdnUrl(bpa.url_list);"
+                + "if(picked){addVariantUnique(vars,sTier,sUrl,labelForHeight(vh,br.gear_name),picked,vw,vh,vsz);}"
+                + "}"
+                + "}"
+                + "if(v.play_addr&&Array.isArray(v.play_addr.url_list)){"
+                + "var paH=Number(v.height||(v.play_addr&&v.play_addr.height)||0);var paW=Number(v.width||(v.play_addr&&v.play_addr.width)||0);var paSz=Number(v.play_addr.data_size||0);"
+                + "var pu=pickBestCdnUrl(v.play_addr.url_list);"
+                + "if(pu){addVariantUnique(vars,sTier,sUrl,labelForHeight(paH,''),pu,paW,paH,paSz);}"
+                + "}"
+                + "if(!vars.length&&v.play_addr&&typeof v.play_addr.uri==='string'&&v.play_addr.uri.length>5){"
+                + "var uri=encodeURIComponent(v.play_addr.uri);"
+                + "addVariantUnique(vars,sTier,sUrl,'1080P','https://www.iesdouyin.com/aweme/v1/play/?video_id='+uri+'&ratio=1080p&line=0',0,1080,0);"
+                + "addVariantUnique(vars,sTier,sUrl,'720P','https://www.iesdouyin.com/aweme/v1/play/?video_id='+uri+'&ratio=720p&line=0',0,720,0);"
+                + "addVariantUnique(vars,sTier,sUrl,'540P','https://www.iesdouyin.com/aweme/v1/play/?video_id='+uri+'&ratio=540p&line=0',0,540,0);"
+                + "}"
+                + "upsertCatalogEntry(vid,ttl,cov,dur,vars);"
+                + "}"
                 + "if(o.video_info&&Array.isArray(o.video_info.variants)){"
-                + "var mp4Vars=[];var hlsVars=[];"
-                + "for(var vi=0;vi<o.video_info.variants.length;vi++){"
-                + "var vr=o.video_info.variants[vi];"
-                + "if(!vr||typeof vr.url!=='string'||vr.url.indexOf('http')!==0)continue;"
-                + "if(vr.content_type==='video/mp4'||vr.url.indexOf('.mp4')>=0)mp4Vars.push(vr);"
-                + "else if(vr.url.indexOf('.m3u8')>=0)hlsVars.push(vr);"
+                + "var xid=String(o.id_str||o.conversation_id_str||o.media_key||'');"
+                + "var mp4v=[];for(var xi=0;xi<o.video_info.variants.length;xi++){var xr=o.video_info.variants[xi];if(xr&&xr.url&&(xr.content_type==='video/mp4'||xr.url.indexOf('.mp4')>=0)&&!isBadStreamUrl(xr.url))mp4v.push(xr);}"
+                + "mp4v.sort(function(a,b){return Number(b.bitrate||0)-Number(a.bitrate||0);});"
+                + "var xvars=[];var xsT={};var xsU={};"
+                + "for(var xm=0;xm<mp4v.length;xm++){"
+                + "var xu=mp4v[xm].url;var dm=xu.match(/\\/(\\d+)x(\\d+)\\//);"
+                + "var xw=dm?Number(dm[1]):0;var xh=dm?Number(dm[2]):0;"
+                + "var xl=xh?labelForHeight(xh,''):('画质'+(xm+1));"
+                + "addVariantUnique(xvars,xsT,xsU,xl,xu,xw,xh,0);"
                 + "}"
-                + "mp4Vars.sort(function(a,b){return Number(b.bitrate||0)-Number(a.bitrate||0);});"
-                + "for(var mi=0;mi<mp4Vars.length;mi++){sendMedia(mp4Vars[mi].url,'video',ttl,0,0,-1);}"
-                + "if(!mp4Vars.length&&hlsVars.length){sendMedia(hlsVars[0].url,'video',ttl,0,0,-1);}"
+                + "if(xvars.length){upsertCatalogEntry(xid,ttl,o.media_url_https||'',Number(o.video_info.duration_millis||0)/1000,xvars);}"
                 + "}"
-                + "if(typeof o.media_url_https==='string'&&o.media_url_https.indexOf('https://pbs.twimg.com/media/')===0){"
-                + "var xImg=o.media_url_https.indexOf('?')>=0?o.media_url_https:(o.media_url_https+'?format=jpg&name=large');"
-                + "sendImage(xImg,ttl,0,0);"
-                + "}"
-                + "var pa=o.play_addr||(o.video&&o.video.play_addr);"
-                + "if(pa&&typeof pa==='object'){"
-                + "if(typeof pa.uri==='string'&&pa.uri.length>4&&pa.uri.indexOf('http')!==0){"
-                + "sendMedia('https://www.iesdouyin.com/aweme/v1/play/?video_id='+encodeURIComponent(pa.uri)+'&ratio=1080p&line=0','video',ttl,Number(o.width||0),Number(o.height||0),-1);"
-                + "}"
-                + "if(Array.isArray(pa.url_list)){"
-                + "for(var i=0;i<pa.url_list.length;i++){"
-                + "var vu=pa.url_list[i];"
-                + "if(typeof vu==='string'&&vu.indexOf('http')===0){"
-                + "sendMedia(vu.replace('/playwm/','/play/'),'video',ttl,Number(o.width||0),Number(o.height||0),-1);"
-                + "break;"
+                + "if(Array.isArray(o)){for(var a=0;a<o.length&&a<80;a++){if(o[a]&&typeof o[a]==='object')q.push({obj:o[a],depth:d+1,title:ttl});}}"
+                + "else{var ks=Object.keys(o);for(var k=0;k<ks.length;k++){var ch=o[ks[k]];if(ch&&typeof ch==='object')q.push({obj:ch,depth:d+1,title:ttl});}}"
                 + "}"
                 + "}"
+                + "function findPageContainerCaptionAndCover(v){"
+                + "var el=v;var cap='';var cov=v.poster||'';"
+                + "for(var step=0;step<8&&el&&el!==document.body;step++){"
+                + "el=el.parentElement;if(!el)break;"
+                + "if(!cap){"
+                + "var cands=el.querySelectorAll('[data-e2e=\"video-desc\"],[data-testid=\"tweetText\"],.video-info-detail,[class*=\"desc\"],[class*=\"Desc\"],[class*=\"title\"],h1');"
+                + "for(var ci=0;ci<cands.length;ci++){var txt=cleanText(cands[ci].innerText||cands[ci].textContent);if(txt&&txt.length>=3&&txt.length<200){cap=txt;break;}}"
                 + "}"
+                + "if(!cov){"
+                + "var imgs=el.querySelectorAll('img');"
+                + "for(var ii=0;ii<imgs.length;ii++){var ir=imgs[ii].getBoundingClientRect();var isrc=imgs[ii].currentSrc||imgs[ii].src||'';if(isrc.indexOf('http')===0&&ir.width>=120&&ir.height>=120&&!/(avatar|icon|logo)/i.test(isrc)){cov=isrc;break;}}"
                 + "}"
-                + "var imgsList=o.images||(o.image_post_info&&o.image_post_info.images);"
-                + "if(Array.isArray(imgsList)){"
-                + "for(var j=0;j<imgsList.length;j++){"
-                + "var im=imgsList[j];if(!im||typeof im!=='object')continue;"
-                + "var list=(im.display_image&&im.display_image.url_list)||(im.owner_watermark_image&&im.owner_watermark_image.url_list)||im.url_list;"
-                + "if(Array.isArray(list)&&list.length){"
-                + "var picked=list[list.length-1]||list[0];"
-                + "if(typeof picked==='string'&&picked.indexOf('http')===0){sendImage(picked,ttl,Number(im.width||0),Number(im.height||0));}"
+                + "var vidAttr=el.getAttribute('data-e2e-vid')||el.getAttribute('data-aweme-id')||'';"
+                + "if(vidAttr)return {cap:cap,cov:cov,domId:vidAttr};"
                 + "}"
+                + "return {cap:cap,cov:cov,domId:''};"
                 + "}"
+                + "function pickActiveVideo(){"
+                + "var vids=document.querySelectorAll('video');var best=null;var bestScore=-1;"
+                + "var vh=window.innerHeight||800;"
+                + "for(var i=0;i<vids.length;i++){"
+                + "var v=vids[i];var src=v.currentSrc||v.src||(v.querySelector('source')?v.querySelector('source').src:'')||'';"
+                + "if(src&&src.indexOf('http')===0&&isBadStreamUrl(src))continue;"
+                + "var r=v.getBoundingClientRect();if(r.width<140||r.height<140)continue;"
+                + "var cy=r.top+r.height/2;if(cy<0||cy>vh)continue;"
+                + "var sc=(!v.paused?1000:0)+(v.readyState>=2?200:0)+(200-Math.min(200,Math.abs(cy-vh/2)));"
+                + "if(sc>bestScore){bestScore=sc;best=v;}"
                 + "}"
-                + "if(Array.isArray(o)){"
-                + "for(var a=0;a<o.length&&a<40;a++){if(o[a]&&typeof o[a]==='object')queue.push({obj:o[a],depth:d+1,title:ttl});}"
-                + "}else{"
-                + "var keys=Object.keys(o);"
-                + "for(var k=0;k<keys.length;k++){"
-                + "var child=o[keys[k]];"
-                + "if(child&&typeof child==='object')queue.push({obj:child,depth:d+1,title:ttl});"
+                + "return best;"
                 + "}"
+                + "function matchCatalogEntry(domId,src,cap){"
+                + "var m=location.href.match(/(?:video|status|note)\\/(\\d{6,})/)||location.href.match(/(?:modal_id|aweme_id)=(\\d{6,})/);"
+                + "var urlId=m?m[1]:'';"
+                + "var cat=window.__joelCatalog.byId;"
+                + "if(domId&&cat[domId])return cat[domId];"
+                + "if(urlId&&cat[urlId])return cat[urlId];"
+                + "if(src&&src.indexOf('http')===0&&cat['u:'+normKey(src)])return cat['u:'+normKey(src)];"
+                + "if(cap&&cap.length>=4&&cat['t:'+cap.slice(0,16)])return cat['t:'+cap.slice(0,16)];"
+                + "return null;"
                 + "}"
-                + "}"
-                + "}"
-                + "window.__joelScanMedia=function(triggerHtml){"
+                + "window.__joelReportActiveVideo=function(){"
                 + "try{"
-                + "var docTitle=(document.title||'').trim();"
-                + "var els=document.querySelectorAll('video,audio,video source,audio source');"
-                + "for(var i=0;i<els.length;i++){"
-                + "var el=els[i];"
-                + "var raw=el.currentSrc||el.src||el.getAttribute('src')||'';"
-                + "if(!raw||raw.indexOf('http')!==0)continue;"
-                + "var tag=el.tagName?el.tagName.toLowerCase():'video';"
-                + "var parent=(tag==='source'&&el.parentElement)?el.parentElement:el;"
-                + "var isAudio=tag==='audio'||(parent.tagName&&parent.tagName.toLowerCase()==='audio');"
-                + "var w=Number(parent.videoWidth||0)||0;var h=Number(parent.videoHeight||0)||0;"
-                + "var dur=Number(parent.duration);if(!isFinite(dur)||dur<0)dur=-1;"
-                + "sendMedia(raw,isAudio?'audio':'video',docTitle,w,h,dur);"
+                + "if(window._ROUTER_DATA&&!window.__joelRouterDone){window.__joelRouterDone=1;indexStructuredNode(window._ROUTER_DATA,document.title);}"
+                + "if(window.__INITIAL_SSR_STATE__&&!window.__joelSsrDone){window.__joelSsrDone=1;indexStructuredNode(window.__INITIAL_SSR_STATE__,document.title);}"
+                + "var rd=document.getElementById('RENDER_DATA');"
+                + "if(rd&&!window.__joelRdDone&&rd.textContent){window.__joelRdDone=1;try{indexStructuredNode(JSON.parse(decodeURIComponent(rd.textContent)),document.title);}catch(__){}}"
+                + "var v=pickActiveVideo();"
+                + "if(v){"
+                + "var src=v.currentSrc||v.src||(v.querySelector('source')?v.querySelector('source').src:'')||'';"
+                + "var info=findPageContainerCaptionAndCover(v);"
+                + "var matched=matchCatalogEntry(info.domId,src,info.cap);"
+                + "var title=cleanText(info.cap||(matched&&matched.title)||document.title||'').replace(/\\s*-\\s*抖音.*$/,'');"
+                + "var cover=info.cov||(matched&&matched.cover)||'';"
+                + "var dur=(isFinite(v.duration)&&v.duration>0)?v.duration:(matched&&matched.durationSec>0?matched.durationSec:-1);"
+                + "var vw=Number(v.videoWidth||0)||0;var vh2=Number(v.videoHeight||0)||0;"
+                + "var variants=[];var sTier={};var sUrl={};"
+                + "if(matched&&matched.variants&&matched.variants.length){"
+                + "for(var mi=0;mi<matched.variants.length;mi++){var mv=matched.variants[mi];addVariantUnique(variants,sTier,sUrl,mv.label,mv.url,mv.width,mv.height,mv.sizeBytes);}"
                 + "}"
-                + "var imgs=document.querySelectorAll('img');"
-                + "for(var m=0;m<imgs.length;m++){"
-                + "var im=imgs[m];"
-                + "var isrc=im.currentSrc||im.src||im.getAttribute('data-src')||'';"
-                + "if(!isrc||isrc.indexOf('http')!==0)continue;"
-                + "var nw=Number(im.naturalWidth||0);var nh=Number(im.naturalHeight||0);"
-                + "var rw=Number(im.width||0);var rh=Number(im.height||0);"
-                + "var isCdn=/(douyinpic\\.com|byteimg\\.com|toutiaoimg\\.com|zjcdn\\.com|douyinstatic\\.com|xhscdn\\.com|pbs\\.twimg\\.com\\/media)/i.test(isrc);"
-                + "if((nw>=240&&nh>=240)||(isCdn&&((nw>=120&&nh>=120)||(rw>=120&&rh>=120)))){"
-                + "sendImage(isrc,docTitle,nw||rw,nh||rh);"
-                + "}"
-                + "}"
-                + "var bgEls=document.querySelectorAll('[style*=\"url\"]');"
-                + "for(var bi=0;bi<bgEls.length&&bi<120;bi++){"
-                + "var st=bgEls[bi].getAttribute('style')||'';"
-                + "var bm=st.match(/url\\([\"']?(https?:\\/\\/[^\"')]+)[\"']?\\)/i);"
-                + "if(bm&&bm[1]&&/(\\.webp|\\.jpg|\\.jpeg|\\.png|douyinpic\\.com|byteimg\\.com|toutiaoimg\\.com|xhscdn\\.com)/i.test(bm[1])){"
-                + "sendImage(bm[1],docTitle,0,0);"
+                + "if(src&&src.indexOf('http')===0&&!isBadStreamUrl(src)){"
+                + "if(src.indexOf('/aweme/v1/play')>=0&&src.indexOf('ratio=')>=0){"
+                + "addVariantUnique(variants,sTier,sUrl,'1080P',src.replace(/ratio=[^&]+/,'ratio=1080p'),vw,1080,0);"
+                + "addVariantUnique(variants,sTier,sUrl,'720P',src.replace(/ratio=[^&]+/,'ratio=720p'),vw,720,0);"
+                + "addVariantUnique(variants,sTier,sUrl,'540P',src.replace(/ratio=[^&]+/,'ratio=540p'),vw,540,0);"
+                + "}else{"
+                + "addVariantUnique(variants,sTier,sUrl,labelForHeight(vh2,''),src,vw,vh2,0);"
                 + "}"
                 + "}"
-                + "if(window._ROUTER_DATA){scanStructuredNode(window._ROUTER_DATA,docTitle);}"
-                + "if(window.__INITIAL_SSR_STATE__){scanStructuredNode(window.__INITIAL_SSR_STATE__,docTitle);}"
-                + "if(document.documentElement&&window.JoelSniffHook){"
-                + "var htmlStr=document.documentElement.innerHTML||'';"
-                + "var htmlSig=location.href+':'+htmlStr.length;"
-                + "if(triggerHtml||window.__joelLastHtmlSig!==htmlSig){"
-                + "window.__joelLastHtmlSig=htmlSig;"
-                + "window.JoelSniffHook.onHtmlSource(htmlStr,docTitle);"
+                + "var vKey=(matched&&matched.id)||info.domId||(variants.length?normKey(variants[0].url):(src.indexOf('blob:')===0?('blob:'+title.slice(0,20)):normKey(src)));"
+                + "if(vKey&&(variants.length||src.indexOf('blob:')===0)){"
+                + "var payload={videoKey:vKey,title:title,coverUrl:cover,durationSec:dur,pageUrl:location.href,useLatestNetStream:(variants.length===0&&src.indexOf('blob:')===0),width:vw,height:vh2,variants:variants};"
+                + "var vSig='';for(var si=0;si<variants.length;si++){vSig+=(si?',':'')+variants[si].label+':'+variants[si].url;}"
+                + "var sig=vKey+'|'+variants.length+'|'+(vSig||'blob');"
+                + "if(sig!==window.__joelLastActiveSig){window.__joelLastActiveSig=sig;if(window.JoelSniffHook&&window.JoelSniffHook.onActiveVideoGroup){window.JoelSniffHook.onActiveVideoGroup(JSON.stringify(payload));}}"
+                + "return;"
                 + "}"
+                + "}"
+                + "var detailMatch=matchCatalogEntry('','','');"
+                + "if(detailMatch&&detailMatch.variants&&detailMatch.variants.length){"
+                + "var dSig=detailMatch.id+'|'+detailMatch.variants.length;"
+                + "if(dSig!==window.__joelLastActiveSig){window.__joelLastActiveSig=dSig;if(window.JoelSniffHook&&window.JoelSniffHook.onActiveVideoGroup){window.JoelSniffHook.onActiveVideoGroup(JSON.stringify({videoKey:detailMatch.id,title:detailMatch.title,coverUrl:detailMatch.cover,durationSec:detailMatch.durationSec,pageUrl:location.href,useLatestNetStream:false,width:0,height:0,variants:detailMatch.variants}));}}"
                 + "}"
                 + "}catch(e){}"
                 + "};"
                 + "if(!window.__joelSniffInstalled){"
                 + "window.__joelSniffInstalled=true;"
-                + "try{"
-                + "var origPlay=HTMLMediaElement.prototype.play;"
-                + "HTMLMediaElement.prototype.play=function(){"
-                + "setTimeout(function(){window.__joelScanMedia&&window.__joelScanMedia(false);},300);"
-                + "return origPlay.apply(this,arguments);"
-                + "};"
-                + "}catch(_){}"
-                + "try{"
-                + "if(window.fetch&&!window.fetch.__joelHooked){"
-                + "var origFetch=window.fetch;"
-                + "window.fetch=function(){"
-                + "return origFetch.apply(this,arguments).then(function(resp){"
-                + "try{"
-                + "var ct=(resp.headers&&resp.headers.get('content-type'))||'';"
-                + "if(ct.indexOf('application/json')>=0||ct.indexOf('text/plain')>=0){"
-                + "resp.clone().text().then(function(txt){"
-                + "if(txt&&txt.length>20&&txt.length<1200000){try{scanStructuredNode(JSON.parse(txt),(document.title||'').trim());}catch(__){}}"
-                + "}).catch(function(){});"
+                + "try{var origPlay=HTMLMediaElement.prototype.play;HTMLMediaElement.prototype.play=function(){setTimeout(function(){window.__joelReportActiveVideo&&window.__joelReportActiveVideo();},260);return origPlay.apply(this,arguments);};}catch(_){}"
+                + "try{if(window.fetch&&!window.fetch.__joelHooked){var origFetch=window.fetch;window.fetch=function(){return origFetch.apply(this,arguments).then(function(resp){try{var ct=(resp.headers&&resp.headers.get('content-type'))||'';if(ct.indexOf('application/json')>=0||ct.indexOf('text/plain')>=0){resp.clone().text().then(function(txt){if(txt&&txt.length>20&&txt.length<1400000){try{indexStructuredNode(JSON.parse(txt),document.title);window.__joelReportActiveVideo&&window.__joelReportActiveVideo();}catch(__){}}}).catch(function(){});}}catch(_){}return resp;});};window.fetch.__joelHooked=true;}}catch(_){}"
+                + "try{var origOpen=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){this.addEventListener('load',function(){try{var ct=(this.getResponseHeader('content-type')||'').toLowerCase();if((ct.indexOf('application/json')>=0||ct.indexOf('text/plain')>=0)&&typeof this.responseText==='string'&&this.responseText.length>20&&this.responseText.length<1400000){indexStructuredNode(JSON.parse(this.responseText),document.title);window.__joelReportActiveVideo&&window.__joelReportActiveVideo();}}catch(_){}});return origOpen.apply(this,arguments);};}catch(_){}"
+                + "setInterval(function(){window.__joelReportActiveVideo&&window.__joelReportActiveVideo();},900);"
                 + "}"
-                + "}catch(_){}"
-                + "return resp;"
-                + "});"
-                + "};"
-                + "window.fetch.__joelHooked=true;"
-                + "}"
-                + "}catch(_){}"
-                + "try{"
-                + "var origOpen=XMLHttpRequest.prototype.open;"
-                + "XMLHttpRequest.prototype.open=function(method,url){"
-                + "this.addEventListener('load',function(){"
-                + "try{"
-                + "var ct=(this.getResponseHeader('content-type')||'').toLowerCase();"
-                + "if((ct.indexOf('application/json')>=0||ct.indexOf('text/plain')>=0)&&typeof this.responseText==='string'&&this.responseText.length>20&&this.responseText.length<1200000){"
-                + "var parsed=JSON.parse(this.responseText);"
-                + "scanStructuredNode(parsed,(document.title||'').trim());"
-                + "}"
-                + "}catch(_){}"
-                + "});"
-                + "return origOpen.apply(this,arguments);"
-                + "};"
-                + "}catch(_){}"
-                + "setInterval(function(){window.__joelScanMedia(false);},1800);"
-                + "}"
-                + "window.__joelScanMedia(forceHtml);"
-                + "if(forceHtml){setTimeout(function(){window.__joelScanMedia(true);},900);}"
+                + (forceScan ? "window.__joelLastActiveSig='';window.__joelRouterDone=0;window.__joelSsrDone=0;window.__joelRdDone=0;" : "")
+                + "window.__joelReportActiveVideo();"
+                + "if(" + (forceScan ? "true" : "false") + "){setTimeout(function(){window.__joelReportActiveVideo();},700);}"
                 + "})();";
         view.evaluateJavascript(js, null);
     }
@@ -989,7 +1344,10 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     private void applySnifferUa(boolean useMobile) {
         snifferUseMobileUa = useMobile;
         if (snifferWebView != null) {
-            snifferWebView.getSettings().setUserAgentString(useMobile ? mobileUa : desktopUa);
+            WebSettings s = snifferWebView.getSettings();
+            s.setUseWideViewPort(!useMobile);
+            s.setLoadWithOverviewMode(!useMobile);
+            s.setUserAgentString(useMobile ? mobileUa : desktopUa);
         }
         if (snifferUaBtn != null) {
             snifferUaBtn.setText(useMobile ? "📱" : "💻");
@@ -1013,7 +1371,24 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || noQuery.endsWith(".shtml")
                 || noQuery.endsWith(".map")
                 || noQuery.endsWith(".m4s")
-                || noQuery.endsWith(".ts")) {
+                || noQuery.endsWith(".ts")
+                || noQuery.endsWith(".mp3")
+                || noQuery.endsWith(".m4a")
+                || noQuery.endsWith(".wav")
+                || noQuery.endsWith(".flac")
+                || noQuery.endsWith(".ogg")
+                || noQuery.endsWith(".aac")
+                || noQuery.endsWith(".webp")
+                || noQuery.endsWith(".jpg")
+                || noQuery.endsWith(".jpeg")
+                || noQuery.endsWith(".png")
+                || noQuery.endsWith(".gif")) {
+            return true;
+        }
+        if (lower.contains("media-audio-und")
+                || lower.contains("mime=audio")
+                || lower.contains("mime_type=audio")
+                || lower.contains("ies-music")) {
             return true;
         }
         if ((lower.contains("video.twimg.com") || lower.contains("twimg.com/"))
@@ -1023,37 +1398,16 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                         || lower.contains(".m4s"))) {
             return true;
         }
-        return lower.contains("mon.zijieapi.com")
+        return lower.contains("bytednsdoc.com")
+                || lower.contains("bytegoofy.com")
+                || lower.contains("bytescm.com")
+                || lower.contains("lf3-static")
+                || lower.contains("lf1-cdn-tos")
+                || lower.contains("mon.zijieapi.com")
                 || lower.contains("mcs.snssdk.com")
                 || lower.contains("doubleclick.net")
                 || lower.contains("google-analytics.com")
                 || lower.contains("arkoselabs.com");
-    }
-
-    private boolean isImageNoiseUrl(String lower) {
-        return lower.contains("avatar")
-                || lower.contains("icon")
-                || lower.contains("emoji")
-                || lower.contains("logo")
-                || lower.contains("favicon")
-                || lower.contains("qrcode")
-                || lower.contains("100x100")
-                || lower.contains("c50x50")
-                || lower.contains("c60x60")
-                || lower.contains(".svg")
-                || lower.contains(".ico")
-                || lower.contains("gstatic.com")
-                || lower.contains("googleapis.com")
-                || lower.contains("bytegoofy.com/ies/douyin_pc_web")
-                || lower.contains("bytescm.com/obj/static");
-    }
-
-    private boolean isImageExtension(String noQuery) {
-        return noQuery.endsWith(".webp")
-                || noQuery.endsWith(".jpg")
-                || noQuery.endsWith(".jpeg")
-                || noQuery.endsWith(".png")
-                || noQuery.endsWith(".gif");
     }
 
     private String detectSniffTypeFromRequest(String url, String secFetchDest, String acceptHeader) {
@@ -1066,40 +1420,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         int q = lower.indexOf('?');
         String noQuery = q > 0 ? lower.substring(0, q) : lower;
 
-        if ("audio".equals(dest)
-                || acc.startsWith("audio/")
-                || noQuery.endsWith(".mp3")
-                || noQuery.endsWith(".m4a")
-                || noQuery.endsWith(".wav")
-                || noQuery.endsWith(".flac")
-                || noQuery.endsWith(".ogg")
-                || noQuery.endsWith(".aac")
-                || lower.contains("ies-music")
-                || lower.contains("mime=audio")
-                || lower.contains("mime_type=audio")
-                || lower.contains(".m4a?")
-                || lower.contains(".mp3?")) {
-            return "audio";
-        }
-
-        boolean isKnownImageHost = lower.contains("douyinpic.com")
-                || lower.contains("byteimg.com")
-                || lower.contains("toutiaoimg.com")
-                || lower.contains("douyinstatic.com")
-                || lower.contains("xhscdn.com")
-                || lower.contains("pbs.twimg.com/media")
-                || lower.contains("cdninstagram.com")
-                || lower.contains("fbcdn.net");
-        if (("image".equals(dest)
-                || acc.startsWith("image/")
-                || isImageExtension(noQuery)
-                || isKnownImageHost)
-                && !isImageNoiseUrl(lower)
-                && !noQuery.endsWith(".mp4")
-                && !lower.contains("mime=video")
-                && !lower.contains("mime_type=video")
-                && !lower.contains("/video/")) {
-            return "image";
+        if ("image".equals(dest) || acc.startsWith("image/") || "audio".equals(dest) || acc.startsWith("audio/")) {
+            return null;
         }
 
         if ("video".equals(dest)
@@ -1113,34 +1435,20 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || lower.contains("douyinvod.com")
                 || lower.contains("zjcdn.com")
                 || lower.contains("bytevcloudcdn.com")
-                || lower.contains("bytegoofy.com")
                 || lower.contains("ixigua.com")
                 || lower.contains("snssdk.com/aweme/")
                 || lower.contains("iesdouyin.com/aweme/")
                 || lower.contains("/aweme/v1/play")
                 || lower.contains("/video/tos/")
                 || lower.contains("bilivideo.com")
-                || lower.contains("hdslb.com")
                 || lower.contains("video.twimg.com")
                 || lower.contains("twimg.com/ext_tw_video")
-                || lower.contains("cdninstagram.com")
                 || lower.contains("googlevideo.com/videoplayback")
                 || lower.contains(".mp4?")
                 || lower.contains("mime=video")
                 || lower.contains("mime_type=video")) {
             return "video";
         }
-
-        if (noQuery.endsWith(".apk")
-                || noQuery.endsWith(".zip")
-                || noQuery.endsWith(".rar")
-                || noQuery.endsWith(".7z")
-                || noQuery.endsWith(".tar.gz")
-                || noQuery.endsWith(".pdf")
-                || lower.contains(".apk?")) {
-            return "file";
-        }
-
         return null;
     }
 
@@ -1165,7 +1473,11 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || lower.contains(".mp3?")) {
             return "audio";
         }
-        if (isImageExtension(noQuery)
+        if (noQuery.endsWith(".webp")
+                || noQuery.endsWith(".jpg")
+                || noQuery.endsWith(".jpeg")
+                || noQuery.endsWith(".png")
+                || noQuery.endsWith(".gif")
                 || lower.contains("douyinpic.com")
                 || lower.contains("byteimg.com")
                 || lower.contains("toutiaoimg.com")
@@ -1262,9 +1574,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                if (snifferCountBadge != null) {
-                    snifferCountBadge.setText(count + " ✓");
-                }
+                updateFloatingFabUi(true);
                 mainWebView.evaluateJavascript(
                         "window.onSniffedMedia && window.onSniffedMedia(" + jsPayload + ");",
                         null);
@@ -1280,6 +1590,17 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     }
 
     private void emitSniffedUpdateToJs(final SniffedResource res, final boolean invalid) {
+        if (res == null) return;
+        synchronized (sniffLock) {
+            if (!sniffedById.containsKey(res.id)) {
+                return;
+            }
+            if (invalid) {
+                sniffedById.remove(res.id);
+                sniffedByUrl.remove(res.url);
+                seenSniffUrls.remove(res.url);
+            }
+        }
         final String jsPayload;
         try {
             JSONObject obj = res.toJson(previewProxyPort);
@@ -1291,6 +1612,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                updateFloatingFabUi(false);
                 mainWebView.evaluateJavascript(
                         "window.onSniffedMediaUpdate && window.onSniffedMediaUpdate(" + jsPayload + ");",
                         null);
@@ -1361,18 +1683,20 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 }
 
                 // Filter out tiny fMP4 init headers (e.g. 786 B X audio init box) and tiny UI icons (< 18 KB)
-                if ("video".equals(res.mediaType)
-                        && totalSize > 0
-                        && totalSize < 32768L
-                        && !res.url.toLowerCase(Locale.ROOT).contains(".m3u8")) {
-                    emitSniffedUpdateToJs(res, true);
-                    return;
-                }
-                if ("image".equals(res.mediaType)
-                        && totalSize > 0
-                        && totalSize < 15360L) {
-                    emitSniffedUpdateToJs(res, true);
-                    return;
+                if (!"DOM".equals(res.source)) {
+                    if ("video".equals(res.mediaType)
+                            && totalSize > 0
+                            && totalSize < 32768L
+                            && !res.url.toLowerCase(Locale.ROOT).contains(".m3u8")) {
+                        emitSniffedUpdateToJs(res, true);
+                        return;
+                    }
+                    if ("image".equals(res.mediaType)
+                            && totalSize > 0
+                            && totalSize < 15360L) {
+                        emitSniffedUpdateToJs(res, true);
+                        return;
+                    }
                 }
 
                 String disp = conn.getHeaderField("Content-Disposition");
@@ -1387,7 +1711,25 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     }
                 }
 
-                emitSniffedUpdateToJs(res, false);
+                // Propagate probed size/mime to sibling quality variants sharing the same URL
+                java.util.List<SniffedResource> matches = new java.util.ArrayList<SniffedResource>();
+                synchronized (sniffLock) {
+                    for (SniffedResource cand : sniffedById.values()) {
+                        if (res.url.equals(cand.url)) {
+                            if (res.sizeBytes > 0) cand.sizeBytes = res.sizeBytes;
+                            if (res.contentType != null && !res.contentType.isEmpty()) cand.contentType = res.contentType;
+                            if (res.suggestedName != null && !res.suggestedName.isEmpty()) cand.suggestedName = res.suggestedName;
+                            matches.add(cand);
+                        }
+                    }
+                }
+                if (matches.isEmpty()) {
+                    emitSniffedUpdateToJs(res, false);
+                } else {
+                    for (SniffedResource m : matches) {
+                        emitSniffedUpdateToJs(m, false);
+                    }
+                }
                 return;
             }
         } catch (Exception ignored) {
@@ -1423,182 +1765,179 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         return -1L;
     }
 
-    private class JoelSniffHook {
-        @JavascriptInterface
-        public void onDomMedia(String mediaUrl, String tagType, String title, int width, int height, double durationSec) {
-            if (mediaUrl == null || !mediaUrl.startsWith("http")) return;
-            String pageUrl = currentSniffPageUrl != null ? currentSniffPageUrl : "";
-            String cookies = resolveCookiesForUrl(mediaUrl, pageUrl);
-            String type = "audio".equals(tagType) ? "audio" : "video";
-            reportSniffedResource(
-                    mediaUrl,
-                    pageUrl,
-                    cookies,
-                    "DOM",
-                    type,
-                    title != null ? title.trim() : "",
-                    width,
-                    height,
-                    durationSec);
+    private void publishActiveVideoGroup(
+            final String videoKey,
+            final String title,
+            final String coverUrl,
+            final double durationSec,
+            final java.util.List<SniffedResource> rawVariants) {
+        if (rawVariants == null || rawVariants.isEmpty()) return;
+
+        final java.util.List<SniffedResource> finalVariants =
+                rawVariants.size() == 1
+                        ? expandSingleVariantToQualityTiers(rawVariants.get(0))
+                        : rawVariants;
+
+        final boolean isNewVideo;
+        final JSONObject groupJson = new JSONObject();
+        try {
+            synchronized (sniffLock) {
+                isNewVideo = !videoKey.equals(currentActiveVideoKey);
+                clearSniffStateLocked();
+                currentActiveVideoKey = videoKey;
+                currentActiveVideoTitle = title;
+                currentActiveCoverUrl = coverUrl;
+                currentActiveDurationSec = durationSec;
+
+                JSONArray jsVars = new JSONArray();
+                for (SniffedResource r : finalVariants) {
+                    seenSniffUrls.add(r.url);
+                    sniffedByUrl.put(r.url, r);
+                    sniffedById.put(r.id, r);
+                    jsVars.put(r.toJson(previewProxyPort));
+                }
+                groupJson.put("videoKey", videoKey);
+                groupJson.put("title", title);
+                groupJson.put("coverUrl", coverUrl);
+                groupJson.put("durationSec", durationSec);
+                groupJson.put("variants", jsVars);
+            }
+        } catch (JSONException ignored) {
+            return;
         }
 
-        @JavascriptInterface
-        public void onDomImage(String imgUrl, String title, int width, int height) {
-            if (imgUrl == null || !imgUrl.startsWith("http")) return;
-            String pageUrl = currentSniffPageUrl != null ? currentSniffPageUrl : "";
-            String cookies = resolveCookiesForUrl(imgUrl, pageUrl);
-            reportSniffedResource(
-                    imgUrl,
-                    pageUrl,
-                    cookies,
-                    "DOM",
-                    "image",
-                    title != null ? title.trim() : "",
-                    width,
-                    height,
-                    -1.0);
-        }
+        final String payloadStr = groupJson.toString();
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                updateFloatingFabUi(isNewVideo);
+                if (mainWebView != null) {
+                    mainWebView.evaluateJavascript(
+                            "window.onActiveVideoGroupUpdate && window.onActiveVideoGroupUpdate(" + payloadStr + ");",
+                            null);
+                }
+            }
+        });
 
-        @JavascriptInterface
-        public void onHtmlSource(final String html, final String pageTitle) {
-            if (html == null || html.isEmpty()) return;
-            final String pageUrl = currentSniffPageUrl != null ? currentSniffPageUrl : "";
+        java.util.Set<String> scheduledUrls = new java.util.HashSet<String>();
+        for (final SniffedResource r : finalVariants) {
+            if (r.url == null || !scheduledUrls.add(r.url)) continue;
             probeExecutor.execute(new Runnable() {
                 @Override
                 public void run() {
-                    parseHtmlForMedia(html, pageUrl, pageTitle != null ? pageTitle.trim() : "");
+                    probeSniffedResourceAsync(r);
                 }
             });
         }
     }
 
-    private void parseHtmlForMedia(String rawHtml, String pageUrl, String pageTitle) {
-        if (rawHtml == null || rawHtml.isEmpty()) return;
-        String clipped = rawHtml.length() > 3500000 ? rawHtml.substring(0, 3500000) : rawHtml;
-
-        StringBuilder buf = new StringBuilder(clipped.length() + 4096);
-        buf.append(clipped);
-        Matcher rdm = RENDER_DATA_PATTERN.matcher(clipped);
-        while (rdm.find()) {
+    private class JoelSniffHook {
+        @JavascriptInterface
+        public void onActiveVideoGroup(String jsonStr) {
+            if (jsonStr == null || jsonStr.trim().isEmpty()) return;
             try {
-                buf.append('\n').append(URLDecoder.decode(rdm.group(1), "UTF-8"));
+                JSONObject obj = new JSONObject(jsonStr);
+                final String videoKey = obj.optString("videoKey", "").trim();
+                final String title = obj.optString("title", "").trim();
+                final String coverUrl = obj.optString("coverUrl", "").trim();
+                final double durationSec = obj.optDouble("durationSec", -1.0);
+                final String pageUrl = obj.optString("pageUrl", currentSniffPageUrl != null ? currentSniffPageUrl : "");
+                final boolean useLatestNet = obj.optBoolean("useLatestNetStream", false);
+                final int domW = obj.optInt("width", 0);
+                final int domH = obj.optInt("height", 0);
+                JSONArray variantsArr = obj.optJSONArray("variants");
+
+                final java.util.List<SniffedResource> nextVariants = new java.util.ArrayList<SniffedResource>();
+                String activeUaMode = snifferUseMobileUa ? "mobile" : "desktop";
+                String activeUa = snifferUseMobileUa ? mobileUa : desktopUa;
+
+                if (variantsArr != null) {
+                    for (int i = 0; i < variantsArr.length(); i++) {
+                        JSONObject vo = variantsArr.optJSONObject(i);
+                        if (vo == null) continue;
+                        String vUrl = vo.optString("url", "").trim();
+                        if (vUrl.isEmpty() || !vUrl.startsWith("http")) continue;
+                        if (isIgnoredStaticAsset(vUrl.toLowerCase(Locale.ROOT))) continue;
+
+                        String id = "sniff_" + sniffIdSeq.incrementAndGet();
+                        String qLabel = vo.optString("label", "高清").trim();
+                        int w = vo.optInt("width", domW);
+                        int h = vo.optInt("height", domH);
+                        long sz = vo.optLong("sizeBytes", -1L);
+                        String cookies = resolveCookiesForUrl(vUrl, pageUrl);
+
+                        SniffedResource r = new SniffedResource(
+                                id, vUrl, pageUrl, cookies, activeUa, activeUaMode,
+                                "DOM", "video", title, w, h, durationSec);
+                        r.qualityLabel = qLabel.isEmpty() ? "高清" : qLabel;
+                        r.coverUrl = coverUrl;
+                        if (sz > 0) r.sizeBytes = sz;
+                        nextVariants.add(r);
+                    }
+                }
+
+                boolean allFallback = !nextVariants.isEmpty();
+                for (SniffedResource r : nextVariants) {
+                    if (!isFallbackPlayUrl(r.url)) {
+                        allFallback = false;
+                        break;
+                    }
+                }
+
+                if ((nextVariants.isEmpty() && useLatestNet) || allFallback) {
+                    String netUrl = latestNetVideoUrl;
+                    if (netUrl != null && netUrl.startsWith("http")
+                            && !isIgnoredStaticAsset(netUrl.toLowerCase(Locale.ROOT))) {
+                        nextVariants.clear();
+                        String id = "sniff_" + sniffIdSeq.incrementAndGet();
+                        String ref = (latestNetVideoReferer != null && !latestNetVideoReferer.isEmpty())
+                                ? latestNetVideoReferer : pageUrl;
+                        String cookies = (latestNetVideoCookie != null && !latestNetVideoCookie.isEmpty())
+                                ? latestNetVideoCookie : resolveCookiesForUrl(netUrl, ref);
+                        SniffedResource r = new SniffedResource(
+                                id, netUrl, ref, cookies, activeUa, activeUaMode,
+                                "NET", "video", title, domW, domH, durationSec);
+                        r.qualityLabel = domH >= 1080 ? "1080P 超清" : (domH >= 720 ? "720P 高清" : (domH > 0 ? domH + "P" : "高清原画"));
+                        r.coverUrl = coverUrl;
+                        nextVariants.add(r);
+                    }
+                }
+
+                if (nextVariants.isEmpty()) return;
+                publishActiveVideoGroup(videoKey, title, coverUrl, durationSec, nextVariants);
             } catch (Exception ignored) {
             }
         }
+    }
 
-        String normalized = buf.toString()
-                .replace("\\u002F", "/")
-                .replace("\\u002f", "/")
-                .replace("\\/", "/")
-                .replace("&amp;", "&");
+    private void clearSniffStateLocked() {
+        seenSniffUrls.clear();
+        sniffedByUrl.clear();
+        sniffedById.clear();
+    }
 
-        Matcher vidMatcher = DOUYIN_VIDEO_ID_PATTERN.matcher(normalized);
-        while (vidMatcher.find()) {
-            String vid = vidMatcher.group(1);
-            if (vid != null && !vid.isEmpty()) {
-                try {
-                    String playUrl = "https://www.iesdouyin.com/aweme/v1/play/?video_id="
-                            + URLEncoder.encode(vid, "UTF-8") + "&ratio=1080p&line=0";
-                    reportSniffedResource(
-                            playUrl,
-                            pageUrl,
-                            resolveCookiesForUrl(playUrl, pageUrl),
-                            "DOM",
-                            "video",
-                            pageTitle,
-                            0,
-                            0,
-                            -1.0);
-                } catch (Exception ignored) {
+    private void clearSniffStateAndSyncJs() {
+        synchronized (sniffLock) {
+            clearSniffStateLocked();
+            currentActiveVideoKey = "";
+            currentActiveVideoTitle = "";
+            currentActiveCoverUrl = "";
+            currentActiveDurationSec = -1.0;
+            latestNetVideoUrl = "";
+            latestNetVideoReferer = "";
+            latestNetVideoCookie = "";
+        }
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                updateFloatingFabUi(false);
+                if (mainWebView != null) {
+                    mainWebView.evaluateJavascript(
+                            "window.onSniffedCleared && window.onSniffedCleared();",
+                            null);
                 }
             }
-        }
-
-        Matcher urlMatcher = URL_EXTRACT_PATTERN.matcher(normalized);
-        int captured = 0;
-        while (urlMatcher.find() && captured < 120) {
-            String rawUrl = urlMatcher.group().replaceAll("[),.;!?'\"\\]\\\\]+$", "");
-            String lower = rawUrl.toLowerCase(Locale.ROOT);
-            if (isIgnoredStaticAsset(lower)) continue;
-
-            int q = lower.indexOf('?');
-            String noQuery = q > 0 ? lower.substring(0, q) : lower;
-
-            if (lower.startsWith("https://video.twimg.com/") && noQuery.endsWith(".mp4")) {
-                captured++;
-                reportSniffedResource(
-                        rawUrl,
-                        pageUrl,
-                        resolveCookiesForUrl(rawUrl, pageUrl),
-                        "DOM",
-                        "video",
-                        pageTitle,
-                        0,
-                        0,
-                        -1.0);
-                continue;
-            }
-
-            if (lower.contains("douyinvod.com")
-                    || lower.contains("bytevcloudcdn.com")
-                    || lower.contains("/aweme/v1/play")
-                    || (lower.contains("zjcdn.com") && !isImageExtension(noQuery))
-                    || noQuery.endsWith(".mp4")
-                    || noQuery.endsWith(".m3u8")) {
-                String cleanVideo = rawUrl.contains("/playwm/")
-                        ? rawUrl.replace("/playwm/", "/play/")
-                        : rawUrl;
-                captured++;
-                reportSniffedResource(
-                        cleanVideo,
-                        pageUrl,
-                        resolveCookiesForUrl(cleanVideo, pageUrl),
-                        "DOM",
-                        "video",
-                        pageTitle,
-                        0,
-                        0,
-                        -1.0);
-                continue;
-            }
-
-            if (noQuery.endsWith(".mp3") || noQuery.endsWith(".m4a")) {
-                captured++;
-                reportSniffedResource(
-                        rawUrl,
-                        pageUrl,
-                        resolveCookiesForUrl(rawUrl, pageUrl),
-                        "DOM",
-                        "audio",
-                        pageTitle,
-                        0,
-                        0,
-                        -1.0);
-                continue;
-            }
-
-            boolean isContentImgHost = lower.contains("douyinpic.com")
-                    || lower.contains("byteimg.com")
-                    || lower.contains("toutiaoimg.com")
-                    || lower.contains("xhscdn.com")
-                    || lower.contains("pbs.twimg.com/media")
-                    || lower.contains("~tplv-dy-");
-            if (isContentImgHost
-                    && (isImageExtension(noQuery) || lower.contains("pbs.twimg.com/media") || lower.contains("douyinpic.com"))
-                    && !isImageNoiseUrl(lower)) {
-                captured++;
-                reportSniffedResource(
-                        rawUrl,
-                        pageUrl,
-                        resolveCookiesForUrl(rawUrl, pageUrl),
-                        "DOM",
-                        "image",
-                        pageTitle,
-                        0,
-                        0,
-                        -1.0);
-            }
-        }
+        });
     }
 
     private void openSnifferOverlay(final String rawUrl) {
@@ -1606,23 +1945,32 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             @Override
             public void run() {
                 closePopupWindow();
-                synchronized (sniffLock) {
-                    seenSniffUrls.clear();
-                    sniffedByUrl.clear();
-                }
-                snifferCountBadge.setText("0");
+                clearSniffStateAndSyncJs();
+                fabScanningState = false;
+                downloadDrawerOpen = false;
+                currentBottomTab = "browser";
+                browserHasPageLoaded = true;
+                browserShowingInTab1 = true;
                 snifferOverlay.setVisibility(View.VISIBLE);
+                snifferOverlay.bringToFront();
                 applySnifferUa(true);
                 String clean = extractCleanUrlFromText(rawUrl);
                 String target = !clean.isEmpty() ? clean : (rawUrl != null ? rawUrl.trim() : "");
-                loadSnifferUrl(target);
+                loadSnifferUrl(target, false);
+                mainWebView.evaluateJavascript(
+                        "window.onBrowserVisibilityChanged && window.onBrowserVisibilityChanged(true, "
+                                + JSONObject.quote(currentSniffPageUrl != null ? currentSniffPageUrl : "") + ");",
+                        null);
             }
         });
     }
 
-    private void loadSnifferUrl(String rawUrl) {
+    private void loadSnifferUrl(String rawUrl, boolean clearPrevious) {
         String raw = rawUrl != null ? rawUrl.trim() : "";
         if (raw.isEmpty()) return;
+        if (clearPrevious) {
+            clearSniffStateAndSyncJs();
+        }
         String clean = extractCleanUrlFromText(raw);
         String u;
         if (!clean.isEmpty()) {
@@ -1630,24 +1978,59 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         } else if (DOMAIN_LIKE_PATTERN.matcher(raw).matches()) {
             u = "https://" + raw;
         } else {
-            Toast.makeText(this, "未识别到有效链接", Toast.LENGTH_SHORT).show();
-            return;
+            try {
+                u = "https://www.bing.com/search?q=" + URLEncoder.encode(raw, "UTF-8");
+            } catch (Exception e) {
+                Toast.makeText(this, "未识别到有效链接", Toast.LENGTH_SHORT).show();
+                return;
+            }
         }
         currentSniffPageUrl = u;
-        snifferUrlInput.setText(u);
+        if (snifferUrlInput != null) {
+            snifferUrlInput.setText(u);
+        }
         snifferWebView.loadUrl(u);
+        mainWebView.evaluateJavascript(
+                "window.onBrowserPageChanged && window.onBrowserPageChanged(" + JSONObject.quote(u) + ");",
+                null);
     }
 
-    private void closeSnifferOverlay() {
+    private void minimizeBrowserToHome() {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
                 closePopupWindow();
-                snifferWebView.stopLoading();
-                snifferWebView.evaluateJavascript(
-                        "document.querySelectorAll('video,audio').forEach(function(e){try{e.pause();}catch(_){}});",
-                        null);
+                downloadDrawerOpen = false;
+                browserShowingInTab1 = false;
+                if (snifferWebView != null) {
+                    snifferWebView.evaluateJavascript(
+                            "document.querySelectorAll('video,audio').forEach(function(e){try{e.pause();}catch(_){}});",
+                            null);
+                }
                 snifferOverlay.setVisibility(View.GONE);
+                mainWebView.bringToFront();
+                mainWebView.evaluateJavascript(
+                        "window.onBrowserVisibilityChanged && window.onBrowserVisibilityChanged(false, "
+                                + JSONObject.quote(currentSniffPageUrl != null ? currentSniffPageUrl : "") + ");",
+                        null);
+            }
+        });
+    }
+
+    private void resumeBrowserPage() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (!browserHasPageLoaded) return;
+                downloadDrawerOpen = false;
+                browserShowingInTab1 = true;
+                currentBottomTab = "browser";
+                snifferOverlay.setVisibility(View.VISIBLE);
+                snifferOverlay.bringToFront();
+                mainWebView.evaluateJavascript(
+                        "window.onBrowserVisibilityChanged && window.onBrowserVisibilityChanged(true, "
+                                + JSONObject.quote(currentSniffPageUrl != null ? currentSniffPageUrl : "") + ");",
+                        null);
             }
         });
     }
@@ -1683,6 +2066,10 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     @SuppressWarnings("deprecation")
     @Override
     public void onBackPressed() {
+        if (downloadDrawerOpen && mainWebView != null) {
+            mainWebView.evaluateJavascript("window.closeDownloadDrawer && window.closeDownloadDrawer();", null);
+            return;
+        }
         if (snifferOverlay != null && snifferOverlay.getVisibility() == View.VISIBLE) {
             if (popupOverlay != null && popupOverlay.getVisibility() == View.VISIBLE) {
                 if (popupWebView != null && popupWebView.canGoBack()) {
@@ -1695,7 +2082,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             if (snifferWebView.canGoBack()) {
                 snifferWebView.goBack();
             } else {
-                closeSnifferOverlay();
+                minimizeBrowserToHome();
             }
             return;
         }
@@ -1716,7 +2103,16 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     }
 
     @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus && pageLoaded && mainWebView != null) {
+            mainWebView.evaluateJavascript("window.onAppWindowFocus && window.onAppWindowFocus();", null);
+        }
+    }
+
+    @Override
     protected void onDestroy() {
+        uiHandler.removeCallbacksAndMessages(null);
         closePopupWindow();
         if (previewProxy != null) {
             previewProxy.stop();
@@ -1736,6 +2132,16 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         GradientDrawable g = new GradientDrawable();
         g.setColor(Color.parseColor(hex));
         g.setCornerRadius(dp(radiusDp));
+        return g;
+    }
+
+    private GradientDrawable circleBg(String fillHex, String strokeHex, int strokeDp) {
+        GradientDrawable g = new GradientDrawable();
+        g.setShape(GradientDrawable.OVAL);
+        g.setColor(Color.parseColor(fillHex));
+        if (strokeHex != null && strokeDp > 0) {
+            g.setStroke(dp(strokeDp), Color.parseColor(strokeHex));
+        }
         return g;
     }
 
@@ -1994,11 +2400,21 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             if (url == null || url.trim().isEmpty()) {
                 return "{\"ok\":false,\"error\":\"Empty URL\"}";
             }
-            DownloadTask t = downloader.enqueue(url, fileName, threads, referer, cookie, uaMode);
+            final DownloadTask t = downloader.enqueue(url, fileName, threads, referer, cookie, uaMode);
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(
+                            MainActivity.this,
+                            "⚡ 已启动 " + t.threads + " 线程高速下载：" + t.fileName,
+                            Toast.LENGTH_SHORT).show();
+                }
+            });
             JSONObject res = new JSONObject();
             try {
                 res.put("ok", true);
                 res.put("id", t.id);
+                res.put("threads", t.threads);
             } catch (JSONException ignored) {
             }
             return res.toString();
@@ -2096,6 +2512,96 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         @JavascriptInterface
         public void openBrowserSniffer(String url) {
             openSnifferOverlay(url);
+        }
+
+        @JavascriptInterface
+        public void resumeBrowserPage() {
+            MainActivity.this.resumeBrowserPage();
+        }
+
+        @JavascriptInterface
+        public void minimizeBrowserToHome() {
+            MainActivity.this.minimizeBrowserToHome();
+        }
+
+        @JavascriptInterface
+        public void onBottomTabChanged(final String tab) {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    currentBottomTab = tab != null ? tab : "browser";
+                    if ("browser".equals(currentBottomTab)) {
+                        if (browserHasPageLoaded && browserShowingInTab1 && !downloadDrawerOpen) {
+                            snifferOverlay.setVisibility(View.VISIBLE);
+                            snifferOverlay.bringToFront();
+                        } else {
+                            snifferOverlay.setVisibility(View.GONE);
+                            mainWebView.bringToFront();
+                        }
+                    } else {
+                        downloadDrawerOpen = false;
+                        if (snifferWebView != null) {
+                            snifferWebView.evaluateJavascript(
+                                    "document.querySelectorAll('video,audio').forEach(function(e){try{e.pause();}catch(_){}});",
+                                    null);
+                        }
+                        snifferOverlay.setVisibility(View.GONE);
+                        mainWebView.bringToFront();
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void onDownloadDrawerOpened() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    downloadDrawerOpen = true;
+                    mainWebView.bringToFront();
+                    if (rootLayout != null) {
+                        rootLayout.requestLayout();
+                        rootLayout.invalidate();
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void onDownloadDrawerClosed() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    downloadDrawerOpen = false;
+                    if ("browser".equals(currentBottomTab) && browserHasPageLoaded && browserShowingInTab1) {
+                        snifferOverlay.setVisibility(View.VISIBLE);
+                        snifferOverlay.bringToFront();
+                    } else {
+                        mainWebView.bringToFront();
+                    }
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void clearSniffedResources() {
+            clearSniffStateAndSyncJs();
+        }
+
+        @JavascriptInterface
+        public void clearBrowserData() {
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    if (snifferWebView != null) {
+                        snifferWebView.clearCache(true);
+                        snifferWebView.clearHistory();
+                    }
+                    CookieManager.getInstance().removeAllCookies(null);
+                    CookieManager.getInstance().flush();
+                    Toast.makeText(MainActivity.this, "已清除浏览器缓存与 Cookie", Toast.LENGTH_SHORT).show();
+                }
+            });
         }
 
         @JavascriptInterface
