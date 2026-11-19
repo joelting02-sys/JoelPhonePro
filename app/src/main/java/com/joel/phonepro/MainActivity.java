@@ -12,7 +12,9 @@ import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Message;
 import android.text.InputType;
+import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
@@ -71,10 +73,10 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MainActivity extends Activity implements MultiThreadDownloader.Listener {
-    private static final String DESKTOP_UA =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
-    private static final String MOBILE_UA =
-            "Mozilla/5.0 (Linux; Android 14; Pixel 8 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36";
+    private static final String DESKTOP_UA_FALLBACK =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+    private static final String MOBILE_UA_FALLBACK =
+            "Mozilla/5.0 (Linux; Android 14; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36";
 
     private static final Pattern URL_EXTRACT_PATTERN = Pattern.compile(
             "https?://[A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%]+",
@@ -85,17 +87,26 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     private static final Pattern DISPOSITION_FILENAME_PATTERN = Pattern.compile(
             "filename\\*?=(?:UTF-8''|\"?)([^\";]+)",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern CHROME_VERSION_PATTERN = Pattern.compile("Chrome/([0-9.]+)");
+
+    private String mobileUa = MOBILE_UA_FALLBACK;
+    private String desktopUa = DESKTOP_UA_FALLBACK;
 
     private FrameLayout rootLayout;
     private WebView mainWebView;
     private MultiThreadDownloader downloader;
 
-    // Native Web Media Sniffer overlay
+    // Native Web Media Sniffer overlay + Multi-window OAuth Popup
     private LinearLayout snifferOverlay;
+    private FrameLayout snifferWebContainer;
     private WebView snifferWebView;
     private EditText snifferUrlInput;
     private Button snifferUaBtn;
     private TextView snifferCountBadge;
+    private LinearLayout popupOverlay;
+    private TextView popupTitleView;
+    private FrameLayout popupWebSlot;
+    private WebView popupWebView;
 
     private final Object sniffLock = new Object();
     private final Set<String> seenSniffUrls = new HashSet<String>();
@@ -111,7 +122,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     private volatile boolean pageLoaded = false;
     private volatile String pendingSharedText = "";
     private volatile String currentSniffPageUrl = "";
-    private volatile boolean snifferUseMobileUa = false;
+    private volatile boolean snifferUseMobileUa = true;
 
     private static class SniffedResource {
         final String id;
@@ -168,7 +179,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             obj.put("url", url);
             obj.put("referer", referer != null ? referer : "");
             obj.put("cookie", cookie != null ? cookie : "");
-            obj.put("uaMode", uaMode != null ? uaMode : "desktop");
+            obj.put("uaMode", uaMode != null ? uaMode : "mobile");
             obj.put("source", source != null ? source : "NET");
             obj.put("mediaType", mediaType != null ? mediaType : "video");
             obj.put("title", title != null ? title : "");
@@ -198,6 +209,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        initUserAgents();
         downloader = new MultiThreadDownloader(this, this);
         startPreviewProxy();
         captureSharedIntent(getIntent());
@@ -239,6 +251,28 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         configureSystemBarAppearance();
         rootLayout.requestApplyInsets();
         mainWebView.loadUrl("file:///android_asset/index.html");
+    }
+
+    private void initUserAgents() {
+        try {
+            String defUa = WebSettings.getDefaultUserAgent(this);
+            if (defUa != null && !defUa.trim().isEmpty()) {
+                String cleanMobile = defUa
+                        .replace("; wv", "")
+                        .replace("Version/4.0 ", "")
+                        .replaceAll(" +", " ")
+                        .trim();
+                mobileUa = cleanMobile;
+                Matcher cm = CHROME_VERSION_PATTERN.matcher(cleanMobile);
+                if (cm.find()) {
+                    desktopUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/"
+                            + cm.group(1) + " Safari/537.36";
+                }
+            }
+        } catch (Exception ignored) {
+            mobileUa = MOBILE_UA_FALLBACK;
+            desktopUa = DESKTOP_UA_FALLBACK;
+        }
     }
 
     @Override
@@ -345,6 +379,20 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         });
     }
 
+    @SuppressLint("SetJavaScriptEnabled")
+    private void configureBrowserWebSettings(WebSettings s, boolean useMobile) {
+        s.setJavaScriptEnabled(true);
+        s.setDomStorageEnabled(true);
+        s.setDatabaseEnabled(true);
+        s.setJavaScriptCanOpenWindowsAutomatically(true);
+        s.setSupportMultipleWindows(true);
+        s.setUseWideViewPort(true);
+        s.setLoadWithOverviewMode(true);
+        s.setMediaPlaybackRequiresUserGesture(false);
+        s.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+        s.setUserAgentString(useMobile ? mobileUa : desktopUa);
+    }
+
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     private void buildSnifferOverlay() {
         snifferOverlay = new LinearLayout(this);
@@ -365,8 +413,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         closeBtn.setTextColor(Color.parseColor("#0F172A"));
         closeBtn.setBackground(pillBg("#F3F4F6", 10));
         closeBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(38), dp(36));
-        closeLp.rightMargin = dp(6);
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(36), dp(36));
+        closeLp.rightMargin = dp(5);
         closeBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -382,7 +430,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         snifferUrlInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         snifferUrlInput.setTextColor(Color.parseColor("#0F172A"));
         snifferUrlInput.setHint("https://...");
-        snifferUrlInput.setPadding(dp(9), dp(5), dp(9), dp(5));
+        snifferUrlInput.setPadding(dp(8), dp(5), dp(8), dp(5));
         snifferUrlInput.setBackground(pillBg("#F8F9FA", 10));
         snifferUrlInput.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
@@ -395,7 +443,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             }
         });
         LinearLayout.LayoutParams urlLp = new LinearLayout.LayoutParams(0, dp(36), 1f);
-        urlLp.rightMargin = dp(6);
+        urlLp.rightMargin = dp(5);
         bar.addView(snifferUrlInput, urlLp);
 
         Button pasteBtn = new Button(this);
@@ -404,8 +452,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         pasteBtn.setTextColor(Color.parseColor("#0F172A"));
         pasteBtn.setBackground(pillBg("#F3F4F6", 10));
         pasteBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        pasteLp.rightMargin = dp(6);
+        LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(dp(34), dp(36));
+        pasteLp.rightMargin = dp(5);
         pasteBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -422,13 +470,13 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         bar.addView(pasteBtn, pasteLp);
 
         snifferUaBtn = new Button(this);
-        snifferUaBtn.setText("💻");
+        snifferUaBtn.setText("📱");
         snifferUaBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         snifferUaBtn.setTextColor(Color.parseColor("#1D4ED8"));
         snifferUaBtn.setBackground(pillBg("#EFF6FF", 10));
         snifferUaBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams uaLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        uaLp.rightMargin = dp(6);
+        LinearLayout.LayoutParams uaLp = new LinearLayout.LayoutParams(dp(34), dp(36));
+        uaLp.rightMargin = dp(5);
         snifferUaBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -444,13 +492,30 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         });
         bar.addView(snifferUaBtn, uaLp);
 
+        Button scanNowBtn = new Button(this);
+        scanNowBtn.setText("🔍");
+        scanNowBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        scanNowBtn.setTextColor(Color.parseColor("#1D4ED8"));
+        scanNowBtn.setBackground(pillBg("#EFF6FF", 10));
+        scanNowBtn.setPadding(0, 0, 0, 0);
+        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(34), dp(36));
+        scanLp.rightMargin = dp(5);
+        scanNowBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Toast.makeText(MainActivity.this, "正在扫描本页视频与图片…", Toast.LENGTH_SHORT).show();
+                injectDomMediaScanner(snifferWebView);
+            }
+        });
+        bar.addView(scanNowBtn, scanLp);
+
         snifferCountBadge = new TextView(this);
         snifferCountBadge.setText("0");
         snifferCountBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         snifferCountBadge.setTypeface(Typeface.DEFAULT_BOLD);
         snifferCountBadge.setTextColor(Color.WHITE);
         snifferCountBadge.setGravity(Gravity.CENTER);
-        snifferCountBadge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        snifferCountBadge.setPadding(dp(9), dp(4), dp(9), dp(4));
         snifferCountBadge.setBackground(pillBg("#2563EB", 14));
         snifferCountBadge.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -466,18 +531,29 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         View divider = new View(this);
         divider.setBackgroundColor(Color.parseColor("#E5E7EB"));
 
+        snifferWebContainer = new FrameLayout(this);
+
         snifferWebView = new WebView(this);
-        WebSettings sws = snifferWebView.getSettings();
-        sws.setJavaScriptEnabled(true);
-        sws.setDomStorageEnabled(true);
-        sws.setMediaPlaybackRequiresUserGesture(false);
-        sws.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
-        sws.setUserAgentString(DESKTOP_UA);
+        configureBrowserWebSettings(snifferWebView.getSettings(), true);
         CookieManager.getInstance().setAcceptCookie(true);
         CookieManager.getInstance().setAcceptThirdPartyCookies(snifferWebView, true);
         snifferWebView.addJavascriptInterface(new JoelSniffHook(), "JoelSniffHook");
 
-        snifferWebView.setWebChromeClient(new WebChromeClient());
+        snifferWebView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(
+                    WebView view,
+                    boolean isDialog,
+                    boolean isUserGesture,
+                    Message resultMsg) {
+                if (resultMsg == null || !(resultMsg.obj instanceof WebView.WebViewTransport)) {
+                    return false;
+                }
+                openPopupWindow((WebView.WebViewTransport) resultMsg.obj);
+                resultMsg.sendToTarget();
+                return true;
+            }
+        });
         snifferWebView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -498,6 +574,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 if (snifferUrlInput != null) {
                     snifferUrlInput.setText(url);
                 }
+                CookieManager.getInstance().flush();
                 injectDomMediaScanner(view);
             }
 
@@ -505,15 +582,22 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 if (request != null && request.getUrl() != null) {
                     final String reqUrl = request.getUrl().toString();
-                    if (isSniffableMediaOrArchive(reqUrl)) {
-                        String pageUrl = currentSniffPageUrl != null ? currentSniffPageUrl : "";
+                    final Map<String, String> hdrs = request.getRequestHeaders();
+                    String secFetchDest = getHeaderIgnoreCase(hdrs, "sec-fetch-dest");
+                    String accept = getHeaderIgnoreCase(hdrs, "accept");
+                    String mediaType = detectSniffTypeFromRequest(reqUrl, secFetchDest, accept);
+                    if (mediaType != null) {
+                        String headerRef = getHeaderIgnoreCase(hdrs, "referer");
+                        String pageUrl = !headerRef.isEmpty()
+                                ? headerRef
+                                : (currentSniffPageUrl != null ? currentSniffPageUrl : "");
                         String cookies = resolveCookiesForUrl(reqUrl, pageUrl);
                         reportSniffedResource(
                                 reqUrl,
                                 pageUrl,
                                 cookies,
                                 "NET",
-                                classifyMediaType(reqUrl, ""),
+                                mediaType,
                                 "",
                                 0,
                                 0,
@@ -524,31 +608,231 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             }
         });
 
+        // Multi-window OAuth Popup container (e.g. Sign in with Google on X)
+        popupOverlay = new LinearLayout(this);
+        popupOverlay.setOrientation(LinearLayout.VERTICAL);
+        popupOverlay.setBackgroundColor(Color.WHITE);
+        popupOverlay.setVisibility(View.GONE);
+
+        LinearLayout popupBar = new LinearLayout(this);
+        popupBar.setOrientation(LinearLayout.HORIZONTAL);
+        popupBar.setGravity(Gravity.CENTER_VERTICAL);
+        popupBar.setPadding(dp(10), dp(6), dp(10), dp(6));
+        popupBar.setBackgroundColor(Color.parseColor("#F8FAFC"));
+
+        popupTitleView = new TextView(this);
+        popupTitleView.setText("账号授权窗口");
+        popupTitleView.setSingleLine(true);
+        popupTitleView.setEllipsize(TextUtils.TruncateAt.END);
+        popupTitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        popupTitleView.setTypeface(Typeface.DEFAULT_BOLD);
+        popupTitleView.setTextColor(Color.parseColor("#0F172A"));
+        popupBar.addView(popupTitleView, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        Button popupCloseBtn = new Button(this);
+        popupCloseBtn.setText("✕ 关闭");
+        popupCloseBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        popupCloseBtn.setTextColor(Color.parseColor("#334155"));
+        popupCloseBtn.setBackground(pillBg("#E2E8F0", 8));
+        popupCloseBtn.setPadding(dp(10), 0, dp(10), 0);
+        popupCloseBtn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                closePopupWindow();
+            }
+        });
+        popupBar.addView(popupCloseBtn, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(30)));
+
+        View popupDivider = new View(this);
+        popupDivider.setBackgroundColor(Color.parseColor("#E2E8F0"));
+
+        popupWebSlot = new FrameLayout(this);
+        popupOverlay.addView(popupBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        popupOverlay.addView(popupDivider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        popupOverlay.addView(popupWebSlot, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        snifferWebContainer.addView(snifferWebView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        snifferWebContainer.addView(popupOverlay, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+
         snifferOverlay.addView(bar, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         snifferOverlay.addView(divider, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
-        snifferOverlay.addView(snifferWebView, new LinearLayout.LayoutParams(
+        snifferOverlay.addView(snifferWebContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void openPopupWindow(WebView.WebViewTransport transport) {
+        closePopupWindow();
+        popupWebView = new WebView(this);
+        configureBrowserWebSettings(popupWebView.getSettings(), snifferUseMobileUa);
+        CookieManager.getInstance().setAcceptCookie(true);
+        CookieManager.getInstance().setAcceptThirdPartyCookies(popupWebView, true);
+
+        popupWebView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onCloseWindow(WebView window) {
+                closePopupWindow();
+            }
+
+            @Override
+            public void onReceivedTitle(WebView view, String title) {
+                if (popupTitleView != null && title != null && !title.trim().isEmpty()) {
+                    popupTitleView.setText(title.trim());
+                }
+            }
+        });
+        popupWebView.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request == null || request.getUrl() == null) return false;
+                return shouldBlockNonHttpScheme(request.getUrl().toString());
+            }
+
+            @SuppressWarnings("deprecation")
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return shouldBlockNonHttpScheme(url);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                CookieManager.getInstance().flush();
+                if (popupTitleView != null && url != null && url.startsWith("http")) {
+                    try {
+                        URL u = new URL(url);
+                        popupTitleView.setText(u.getHost());
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        });
+
+        popupWebSlot.addView(popupWebView, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        popupTitleView.setText("账号授权窗口");
+        popupOverlay.setVisibility(View.VISIBLE);
+        transport.setWebView(popupWebView);
+    }
+
+    private void closePopupWindow() {
+        if (popupOverlay != null) {
+            popupOverlay.setVisibility(View.GONE);
+        }
+        if (popupWebSlot != null) {
+            popupWebSlot.removeAllViews();
+        }
+        if (popupWebView != null) {
+            try {
+                popupWebView.stopLoading();
+                popupWebView.onPause();
+                popupWebView.destroy();
+            } catch (Exception ignored) {
+            }
+            popupWebView = null;
+        }
+        CookieManager.getInstance().flush();
     }
 
     private boolean shouldBlockNonHttpScheme(String url) {
         if (url == null || url.isEmpty()) return false;
         String lower = url.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("http://") || lower.startsWith("https://") || lower.startsWith("about:")) {
+        if (lower.startsWith("http://")
+                || lower.startsWith("https://")
+                || lower.startsWith("about:")
+                || lower.startsWith("blob:")
+                || lower.startsWith("data:")
+                || lower.startsWith("javascript:")) {
             return false;
         }
         return true;
     }
 
+    private String getHeaderIgnoreCase(Map<String, String> headers, String key) {
+        if (headers == null || key == null) return "";
+        for (Map.Entry<String, String> e : headers.entrySet()) {
+            if (e.getKey() != null && key.equalsIgnoreCase(e.getKey()) && e.getValue() != null) {
+                return e.getValue();
+            }
+        }
+        return "";
+    }
+
     private void injectDomMediaScanner(final WebView view) {
         if (view == null) return;
         final String js = "(function(){"
-                + "if(window.__joelSniffInstalled){window.__joelScanMedia&&window.__joelScanMedia();return;}"
-                + "window.__joelSniffInstalled=true;"
+                + "if(!window.__joelSentUrls){window.__joelSentUrls={};}"
+                + "function sendMedia(u,kind,title,w,h,dur){"
+                + "if(!u||u.indexOf('http')!==0)return;"
+                + "var key=kind+':'+u;"
+                + "if(window.__joelSentUrls[key])return;"
+                + "window.__joelSentUrls[key]=1;"
+                + "if(window.JoelSniffHook){window.JoelSniffHook.onDomMedia(u,kind,title||'',w||0,h||0,dur>=0?dur:-1);}"
+                + "}"
+                + "function sendImage(u,title,w,h){"
+                + "if(!u||u.indexOf('http')!==0)return;"
+                + "if(/(avatar|icon|emoji|logo|qrcode|100x100|c50x50|c60x60|\\.svg)/i.test(u))return;"
+                + "var key='img:'+u;"
+                + "if(window.__joelSentUrls[key])return;"
+                + "window.__joelSentUrls[key]=1;"
+                + "if(window.JoelSniffHook){window.JoelSniffHook.onDomImage(u,title||'',w||0,h||0);}"
+                + "}"
+                + "function scanStructuredNode(root,fallbackTitle){"
+                + "if(!root||typeof root!=='object')return;"
+                + "var queue=[{obj:root,depth:0,title:fallbackTitle}];"
+                + "var visited=0;"
+                + "while(queue.length&&visited<2500){"
+                + "var cur=queue.shift();var o=cur.obj;var d=cur.depth;var ttl=cur.title;"
+                + "if(!o||typeof o!=='object'||d>12)continue;"
+                + "visited++;"
+                + "if(typeof o.desc==='string'&&o.desc.trim())ttl=o.desc.trim();"
+                + "else if(typeof o.item_title==='string'&&o.item_title.trim())ttl=o.item_title.trim();"
+                + "if(o.play_addr&&typeof o.play_addr==='object'){"
+                + "if(typeof o.play_addr.uri==='string'&&o.play_addr.uri.length>4&&o.play_addr.uri.indexOf('http')!==0){"
+                + "sendMedia('https://aweme.snssdk.com/aweme/v1/play/?video_id='+encodeURIComponent(o.play_addr.uri)+'&ratio=1080p&line=0','video',ttl,Number(o.width||0),Number(o.height||0),-1);"
+                + "}"
+                + "if(Array.isArray(o.play_addr.url_list)){"
+                + "for(var i=0;i<o.play_addr.url_list.length;i++){"
+                + "var vu=o.play_addr.url_list[i];"
+                + "if(typeof vu==='string'&&vu.indexOf('http')===0){"
+                + "sendMedia(vu.replace('/playwm/','/play/'),'video',ttl,Number(o.width||0),Number(o.height||0),-1);"
+                + "break;"
+                + "}"
+                + "}"
+                + "}"
+                + "}"
+                + "if(Array.isArray(o.images)){"
+                + "for(var j=0;j<o.images.length;j++){"
+                + "var im=o.images[j];if(!im||typeof im!=='object')continue;"
+                + "var list=(im.display_image&&im.display_image.url_list)||im.url_list;"
+                + "if(Array.isArray(list)&&list.length){"
+                + "var picked=list[list.length-1]||list[0];"
+                + "if(typeof picked==='string'&&picked.indexOf('http')===0){sendImage(picked,ttl,Number(im.width||0),Number(im.height||0));}"
+                + "}"
+                + "}"
+                + "}"
+                + "if(Array.isArray(o)){"
+                + "for(var a=0;a<o.length&&a<40;a++){if(o[a]&&typeof o[a]==='object')queue.push({obj:o[a],depth:d+1,title:ttl});}"
+                + "}else{"
+                + "var keys=Object.keys(o);"
+                + "for(var k=0;k<keys.length;k++){"
+                + "var child=o[keys[k]];"
+                + "if(child&&typeof child==='object')queue.push({obj:child,depth:d+1,title:ttl});"
+                + "}"
+                + "}"
+                + "}"
+                + "}"
                 + "window.__joelScanMedia=function(){"
                 + "try{"
-                + "var title=(document.title||'').trim();"
+                + "var docTitle=(document.title||'').trim();"
                 + "var els=document.querySelectorAll('video,audio,video source,audio source');"
                 + "for(var i=0;i<els.length;i++){"
                 + "var el=els[i];"
@@ -557,19 +841,71 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "var tag=el.tagName?el.tagName.toLowerCase():'video';"
                 + "var parent=(tag==='source'&&el.parentElement)?el.parentElement:el;"
                 + "var isAudio=tag==='audio'||(parent.tagName&&parent.tagName.toLowerCase()==='audio');"
-                + "var w=Number(parent.videoWidth||0)||0;"
-                + "var h=Number(parent.videoHeight||0)||0;"
-                + "var dur=Number(parent.duration);"
-                + "if(!isFinite(dur)||dur<0)dur=-1;"
-                + "if(window.JoelSniffHook){"
-                + "window.JoelSniffHook.onDomMedia(raw,isAudio?'audio':'video',title,w,h,dur);"
+                + "var w=Number(parent.videoWidth||0)||0;var h=Number(parent.videoHeight||0)||0;"
+                + "var dur=Number(parent.duration);if(!isFinite(dur)||dur<0)dur=-1;"
+                + "sendMedia(raw,isAudio?'audio':'video',docTitle,w,h,dur);"
+                + "}"
+                + "var imgs=document.querySelectorAll('img');"
+                + "for(var m=0;m<imgs.length;m++){"
+                + "var im=imgs[m];"
+                + "var isrc=im.currentSrc||im.src||im.getAttribute('data-src')||'';"
+                + "if(!isrc||isrc.indexOf('http')!==0)continue;"
+                + "var nw=Number(im.naturalWidth||0);var nh=Number(im.naturalHeight||0);"
+                + "var rw=Number(im.width||0);var rh=Number(im.height||0);"
+                + "var isCdn=/(douyinpic\\.com|byteimg\\.com|xhscdn\\.com|pbs\\.twimg\\.com\\/media)/i.test(isrc);"
+                + "if((nw>=260&&nh>=260)||(isCdn&&((nw>=160&&nh>=160)||(rw>=160&&rh>=160)))){"
+                + "sendImage(isrc,docTitle,nw||rw,nh||rh);"
                 + "}"
                 + "}"
+                + "if(window._ROUTER_DATA){scanStructuredNode(window._ROUTER_DATA,docTitle);}"
+                + "if(window.__INITIAL_SSR_STATE__){scanStructuredNode(window.__INITIAL_SSR_STATE__,docTitle);}"
                 + "}catch(e){}"
                 + "};"
-                + "window.__joelScanMedia();"
-                + "setTimeout(window.__joelScanMedia,800);"
+                + "if(!window.__joelSniffInstalled){"
+                + "window.__joelSniffInstalled=true;"
+                + "try{"
+                + "var origPlay=HTMLMediaElement.prototype.play;"
+                + "HTMLMediaElement.prototype.play=function(){"
+                + "setTimeout(function(){window.__joelScanMedia&&window.__joelScanMedia();},300);"
+                + "return origPlay.apply(this,arguments);"
+                + "};"
+                + "}catch(_){}"
+                + "try{"
+                + "if(window.fetch&&!window.fetch.__joelHooked){"
+                + "var origFetch=window.fetch;"
+                + "window.fetch=function(){"
+                + "return origFetch.apply(this,arguments).then(function(resp){"
+                + "try{"
+                + "var ct=(resp.headers&&resp.headers.get('content-type'))||'';"
+                + "if(ct.indexOf('application/json')>=0){"
+                + "resp.clone().json().then(function(data){scanStructuredNode(data,(document.title||'').trim());}).catch(function(){});"
+                + "}"
+                + "}catch(_){}"
+                + "return resp;"
+                + "});"
+                + "};"
+                + "window.fetch.__joelHooked=true;"
+                + "}"
+                + "}catch(_){}"
+                + "try{"
+                + "var origOpen=XMLHttpRequest.prototype.open;"
+                + "XMLHttpRequest.prototype.open=function(method,url){"
+                + "this.addEventListener('load',function(){"
+                + "try{"
+                + "var ct=(this.getResponseHeader('content-type')||'').toLowerCase();"
+                + "if(ct.indexOf('application/json')>=0&&typeof this.responseText==='string'&&this.responseText.length>20&&this.responseText.length<600000){"
+                + "var parsed=JSON.parse(this.responseText);"
+                + "scanStructuredNode(parsed,(document.title||'').trim());"
+                + "}"
+                + "}catch(_){}"
+                + "});"
+                + "return origOpen.apply(this,arguments);"
+                + "};"
+                + "}catch(_){}"
                 + "setInterval(window.__joelScanMedia,1800);"
+                + "}"
+                + "window.__joelScanMedia();"
+                + "setTimeout(window.__joelScanMedia,700);"
                 + "})();";
         view.evaluateJavascript(js, null);
     }
@@ -590,22 +926,10 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         return url.replaceAll("[),.;!?'\"\\]]+$", "");
     }
 
-    private boolean shouldUseMobileUaForUrl(String url) {
-        if (url == null) return false;
-        String lower = url.toLowerCase(Locale.ROOT);
-        return lower.contains("douyin.com")
-                || lower.contains("iesdouyin.com")
-                || lower.contains("xhslink.com")
-                || lower.contains("xiaohongshu.com")
-                || lower.contains("b23.tv")
-                || lower.contains("tiktok.com")
-                || lower.contains("kuaishou.com");
-    }
-
     private void applySnifferUa(boolean useMobile) {
         snifferUseMobileUa = useMobile;
         if (snifferWebView != null) {
-            snifferWebView.getSettings().setUserAgentString(useMobile ? MOBILE_UA : DESKTOP_UA);
+            snifferWebView.getSettings().setUserAgentString(useMobile ? mobileUa : desktopUa);
         }
         if (snifferUaBtn != null) {
             snifferUaBtn.setText(useMobile ? "📱" : "💻");
@@ -633,54 +957,87 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         return lower.contains("mon.zijieapi.com")
                 || lower.contains("mcs.snssdk.com")
                 || lower.contains("doubleclick.net")
-                || lower.contains("google-analytics.com");
+                || lower.contains("google-analytics.com")
+                || lower.contains("arkoselabs.com");
     }
 
-    private boolean isSniffableMediaOrArchive(String url) {
-        if (url == null || !url.startsWith("http")) return false;
+    private String detectSniffTypeFromRequest(String url, String secFetchDest, String acceptHeader) {
+        if (url == null || !url.startsWith("http")) return null;
         String lower = url.toLowerCase(Locale.ROOT);
-        if (isIgnoredStaticAsset(lower)) return false;
+        if (isIgnoredStaticAsset(lower)) return null;
 
+        String dest = secFetchDest != null ? secFetchDest.toLowerCase(Locale.ROOT) : "";
+        String acc = acceptHeader != null ? acceptHeader.toLowerCase(Locale.ROOT) : "";
         int q = lower.indexOf('?');
         String noQuery = q > 0 ? lower.substring(0, q) : lower;
-        if (noQuery.endsWith(".mp4")
-                || noQuery.endsWith(".mkv")
-                || noQuery.endsWith(".mov")
-                || noQuery.endsWith(".webm")
-                || noQuery.endsWith(".flv")
-                || noQuery.endsWith(".m3u8")
+
+        if ("audio".equals(dest)
+                || acc.startsWith("audio/")
                 || noQuery.endsWith(".mp3")
                 || noQuery.endsWith(".m4a")
                 || noQuery.endsWith(".wav")
                 || noQuery.endsWith(".flac")
                 || noQuery.endsWith(".ogg")
                 || noQuery.endsWith(".aac")
-                || noQuery.endsWith(".apk")
+                || lower.contains("ies-music")
+                || lower.contains("mime=audio")
+                || lower.contains("mime_type=audio")
+                || lower.contains(".m4a?")
+                || lower.contains(".mp3?")) {
+            return "audio";
+        }
+
+        if ("video".equals(dest)
+                || acc.startsWith("video/")
+                || noQuery.endsWith(".mp4")
+                || noQuery.endsWith(".mkv")
+                || noQuery.endsWith(".mov")
+                || noQuery.endsWith(".webm")
+                || noQuery.endsWith(".flv")
+                || noQuery.endsWith(".m3u8")
+                || lower.contains("douyinvod.com")
+                || lower.contains("zjcdn.com")
+                || lower.contains("bytevcloudcdn.com")
+                || lower.contains("ixigua.com")
+                || lower.contains("/aweme/v1/play")
+                || lower.contains("/video/tos/")
+                || lower.contains("bilivideo.com")
+                || lower.contains("video.twimg.com")
+                || lower.contains("twimg.com/ext_tw_video")
+                || lower.contains("googlevideo.com/videoplayback")
+                || lower.contains(".mp4?")
+                || lower.contains("mime=video")
+                || lower.contains("mime_type=video")) {
+            return "video";
+        }
+
+        if (noQuery.endsWith(".apk")
                 || noQuery.endsWith(".zip")
                 || noQuery.endsWith(".rar")
                 || noQuery.endsWith(".7z")
                 || noQuery.endsWith(".tar.gz")
-                || noQuery.endsWith(".pdf")) {
-            return true;
+                || noQuery.endsWith(".pdf")
+                || lower.contains(".apk?")) {
+            return "file";
         }
-        if (lower.contains("douyinvod.com")
-                || lower.contains("snssdk.com/aweme/")
-                || lower.contains("/aweme/v1/play")
-                || lower.contains("/video/tos/")
-                || lower.contains("bilivideo.com")) {
-            return true;
+
+        boolean isImageHost = lower.contains("douyinpic.com")
+                || lower.contains("byteimg.com")
+                || lower.contains("xhscdn.com")
+                || lower.contains("pbs.twimg.com/media");
+        if (isImageHost
+                && !lower.contains("avatar")
+                && !lower.contains("icon")
+                && !lower.contains("emoji")
+                && !lower.contains("qrcode")
+                && !lower.contains("100x100")
+                && !lower.contains("c50x50")
+                && !lower.contains("c60x60")
+                && !lower.contains("logo")) {
+            return "image";
         }
-        if (lower.contains("xhscdn.com") && (lower.contains(".mp4") || lower.contains("stream"))) {
-            return true;
-        }
-        return lower.contains(".mp4?")
-                || lower.contains(".m4a?")
-                || lower.contains(".mp3?")
-                || lower.contains(".apk?")
-                || lower.contains("mime=video")
-                || lower.contains("mime_type=video")
-                || lower.contains("mime=audio")
-                || lower.contains("mime_type=audio");
+
+        return null;
     }
 
     private String classifyMediaType(String url, String contentType) {
@@ -708,7 +1065,10 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || noQuery.endsWith(".jpeg")
                 || noQuery.endsWith(".png")
                 || noQuery.endsWith(".webp")
-                || noQuery.endsWith(".gif")) {
+                || noQuery.endsWith(".gif")
+                || lower.contains("douyinpic.com")
+                || lower.contains("byteimg.com")
+                || lower.contains("pbs.twimg.com/media")) {
             return "image";
         }
         if (noQuery.endsWith(".apk")
@@ -736,7 +1096,6 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         if (url == null || !url.startsWith("http")) return;
 
         final SniffedResource existingOrNew;
-        final boolean isNew;
         final int count;
         synchronized (sniffLock) {
             SniffedResource existing = sniffedByUrl.get(url);
@@ -772,7 +1131,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             seenSniffUrls.add(url);
             String id = "sniff_" + sniffIdSeq.incrementAndGet();
             String activeUaMode = snifferUseMobileUa ? "mobile" : "desktop";
-            String activeUa = snifferUseMobileUa ? MOBILE_UA : DESKTOP_UA;
+            String activeUa = snifferUseMobileUa ? mobileUa : desktopUa;
             existingOrNew = new SniffedResource(
                     id,
                     url,
@@ -788,11 +1147,9 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     durationSec);
             sniffedByUrl.put(url, existingOrNew);
             sniffedById.put(id, existingOrNew);
-            isNew = true;
             count = seenSniffUrls.size();
         }
 
-        if (!isNew) return;
         final String jsPayload;
         try {
             jsPayload = existingOrNew.toJson(previewProxyPort).toString();
@@ -820,11 +1177,11 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         });
     }
 
-    private void emitSniffedUpdateToJs(final SniffedResource res, final boolean isHtmlTrap) {
+    private void emitSniffedUpdateToJs(final SniffedResource res, final boolean invalid) {
         final String jsPayload;
         try {
             JSONObject obj = res.toJson(previewProxyPort);
-            obj.put("invalid", isHtmlTrap);
+            obj.put("invalid", invalid);
             jsPayload = obj.toString();
         } catch (JSONException e) {
             return;
@@ -868,11 +1225,21 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     continue;
                 }
 
+                // Never drop valid CDN streams just because background probe lacked a one-shot token (403/404)
+                if (code >= 400) {
+                    return;
+                }
+
                 String ct = conn.getContentType();
                 String lowerCt = ct != null ? ct.toLowerCase(Locale.ROOT) : "";
-                boolean isHtmlTrap = !"DOM".equals(res.source)
-                        && (lowerCt.contains("text/html") || code == 403 || code == 404);
-                if (isHtmlTrap) {
+                boolean isNonMediaPage = "NET".equals(res.source)
+                        && code == 200
+                        && (lowerCt.startsWith("text/html")
+                                || lowerCt.startsWith("text/plain")
+                                || lowerCt.startsWith("application/json")
+                                || lowerCt.startsWith("application/javascript"))
+                        && !res.url.toLowerCase(Locale.ROOT).contains(".m3u8");
+                if (isNonMediaPage) {
                     emitSniffedUpdateToJs(res, true);
                     return;
                 }
@@ -880,7 +1247,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 if (ct != null && !ct.isEmpty()) {
                     int semi = ct.indexOf(';');
                     res.contentType = semi > 0 ? ct.substring(0, semi).trim() : ct.trim();
-                    if (!"DOM".equals(res.source)) {
+                    if (!"DOM".equals(res.source)
+                            && !res.contentType.toLowerCase(Locale.ROOT).startsWith("application/octet-stream")) {
                         res.mediaType = classifyMediaType(res.url, res.contentType);
                     }
                 }
@@ -888,6 +1256,12 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 long totalSize = parseTotalBytesFromHeaders(conn);
                 if (totalSize > 0) {
                     res.sizeBytes = totalSize;
+                }
+
+                if ("NET".equals(res.source) && "image".equals(res.mediaType)
+                        && totalSize > 0 && totalSize < 15360L) {
+                    emitSniffedUpdateToJs(res, true);
+                    return;
                 }
 
                 String disp = conn.getHeaderField("Content-Disposition");
@@ -956,26 +1330,39 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     height,
                     durationSec);
         }
+
+        @JavascriptInterface
+        public void onDomImage(String imgUrl, String title, int width, int height) {
+            if (imgUrl == null || !imgUrl.startsWith("http")) return;
+            String pageUrl = currentSniffPageUrl != null ? currentSniffPageUrl : "";
+            String cookies = resolveCookiesForUrl(imgUrl, pageUrl);
+            reportSniffedResource(
+                    imgUrl,
+                    pageUrl,
+                    cookies,
+                    "DOM",
+                    "image",
+                    title != null ? title.trim() : "",
+                    width,
+                    height,
+                    -1.0);
+        }
     }
 
     private void openSnifferOverlay(final String rawUrl) {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                closePopupWindow();
                 synchronized (sniffLock) {
                     seenSniffUrls.clear();
                     sniffedByUrl.clear();
                 }
                 snifferCountBadge.setText("0");
                 snifferOverlay.setVisibility(View.VISIBLE);
+                applySnifferUa(true);
                 String clean = extractCleanUrlFromText(rawUrl);
                 String target = !clean.isEmpty() ? clean : (rawUrl != null ? rawUrl.trim() : "");
-                boolean defaultMobile = false;
-                try {
-                    defaultMobile = "mobile".equals(downloader.getSettingsJson().optString("defaultUaMode", "desktop"));
-                } catch (Exception ignored) {
-                }
-                applySnifferUa(shouldUseMobileUaForUrl(target) || defaultMobile);
                 loadSnifferUrl(target);
             }
         });
@@ -994,9 +1381,6 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             Toast.makeText(this, "未识别到有效链接", Toast.LENGTH_SHORT).show();
             return;
         }
-        if (shouldUseMobileUaForUrl(u) && !snifferUseMobileUa) {
-            applySnifferUa(true);
-        }
         currentSniffPageUrl = u;
         snifferUrlInput.setText(u);
         snifferWebView.loadUrl(u);
@@ -1006,6 +1390,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
+                closePopupWindow();
                 snifferWebView.stopLoading();
                 snifferWebView.evaluateJavascript(
                         "document.querySelectorAll('video,audio').forEach(function(e){try{e.pause();}catch(_){}});",
@@ -1047,6 +1432,14 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
     @Override
     public void onBackPressed() {
         if (snifferOverlay != null && snifferOverlay.getVisibility() == View.VISIBLE) {
+            if (popupOverlay != null && popupOverlay.getVisibility() == View.VISIBLE) {
+                if (popupWebView != null && popupWebView.canGoBack()) {
+                    popupWebView.goBack();
+                } else {
+                    closePopupWindow();
+                }
+                return;
+            }
             if (snifferWebView.canGoBack()) {
                 snifferWebView.goBack();
             } else {
@@ -1072,6 +1465,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
 
     @Override
     protected void onDestroy() {
+        closePopupWindow();
         if (previewProxy != null) {
             previewProxy.stop();
         }
@@ -1213,7 +1607,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     conn.setRequestMethod(isHead ? "HEAD" : "GET");
                     conn.setRequestProperty(
                             "User-Agent",
-                            res.userAgent != null && !res.userAgent.isEmpty() ? res.userAgent : MOBILE_UA);
+                            res.userAgent != null && !res.userAgent.isEmpty() ? res.userAgent : mobileUa);
                     conn.setRequestProperty("Accept", "*/*");
                     if (res.referer != null && !res.referer.isEmpty()) {
                         conn.setRequestProperty("Referer", res.referer);

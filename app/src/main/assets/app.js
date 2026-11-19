@@ -45,6 +45,7 @@ const I18N = {
     sniffFilterAllBtn: "全部",
     sniffFilterVideoBtn: "🎬 视频",
     sniffFilterAudioBtn: "🎵 音频",
+    sniffFilterImageBtn: "🖼️ 图片",
     sniffFilterFileBtn: "📦 文件",
     emptySniffed: "暂无捕获到的媒体直链。粘贴抖音或网页链接打开嗅探并播放，资源会显示在这里。",
     emptySniffedFiltered: "当前分类下没有捕获到的资源。",
@@ -147,6 +148,7 @@ const I18N = {
     sniffFilterAllBtn: "All",
     sniffFilterVideoBtn: "🎬 Video",
     sniffFilterAudioBtn: "🎵 Audio",
+    sniffFilterImageBtn: "🖼️ Image",
     sniffFilterFileBtn: "📦 File",
     emptySniffed: "No media streams captured yet. Paste a share text or webpage URL above to detect media links.",
     emptySniffedFiltered: "No captured resources match this category.",
@@ -359,6 +361,7 @@ function applyI18n() {
   syncText("sniffFilterAllBtn", dict.sniffFilterAllBtn);
   syncText("sniffFilterVideoBtn", dict.sniffFilterVideoBtn);
   syncText("sniffFilterAudioBtn", dict.sniffFilterAudioBtn);
+  syncText("sniffFilterImageBtn", dict.sniffFilterImageBtn);
   syncText("sniffFilterFileBtn", dict.sniffFilterFileBtn);
 
   syncText("settingsHeading", dict.settingsHeading);
@@ -670,9 +673,15 @@ function deriveSniffedFileName(item) {
       .slice(0, 48);
     if (cleanTitle) {
       let ext = ".mp4";
-      if (item.mediaType === "audio") ext = ".m4a";
-      else if (item.mediaType === "image") ext = ".jpg";
-      else if (item.mediaType === "file" && urlInfo.fileName && urlInfo.fileName.includes(".")) {
+      const lowerUrl = String(item.url || "").toLowerCase();
+      const lowerCt = String(item.contentType || "").toLowerCase();
+      if (item.mediaType === "audio") {
+        ext = ".m4a";
+      } else if (item.mediaType === "image") {
+        if (lowerCt.includes("webp") || lowerUrl.includes(".webp")) ext = ".webp";
+        else if (lowerCt.includes("png") || lowerUrl.includes(".png")) ext = ".png";
+        else ext = ".jpg";
+      } else if (item.mediaType === "file" && urlInfo.fileName && urlInfo.fileName.includes(".")) {
         ext = `.${urlInfo.fileName.split(".").pop()}`;
       } else if (urlInfo.fileName && /\.(mp4|mkv|mov|webm|m3u8|mp3|m4a|wav|flac|apk|zip|pdf)$/i.test(urlInfo.fileName)) {
         ext = `.${urlInfo.fileName.split(".").pop().toLowerCase()}`;
@@ -712,11 +721,15 @@ function buildSniffMetaPillsHtml(item, dict) {
 
 function matchesSniffFilter(item, filterType) {
   if (filterType === "all") return true;
+  return (item.mediaType || "video") === filterType;
+}
+
+function sniffSortPriority(item) {
   const mt = item.mediaType || "video";
-  if (filterType === "file") {
-    return mt === "file" || mt === "image";
-  }
-  return mt === filterType;
+  if (mt === "video") return item.source === "DOM" ? 5 : 4;
+  if (mt === "image") return 3;
+  if (mt === "audio") return 2;
+  return 1;
 }
 
 function updateActivePreviewMetaText(metaBarEl, item, videoEl, dict) {
@@ -757,9 +770,9 @@ function renderSniffed() {
     .filter((item) => matchesSniffFilter(item, appState.sniffTypeFilter))
     .slice()
     .sort((a, b) => {
-      const aDom = a.source === "DOM" ? 1 : 0;
-      const bDom = b.source === "DOM" ? 1 : 0;
-      if (aDom !== bDom) return bDom - aDom;
+      const pa = sniffSortPriority(a);
+      const pb = sniffSortPriority(b);
+      if (pa !== pb) return pb - pa;
       return (b.capturedAt || 0) - (a.capturedAt || 0);
     });
 
@@ -858,6 +871,7 @@ function renderSniffed() {
     if (isPreviewOpen) {
       const metaBarEl = card.querySelector('[data-preview-meta="1"]');
       const mediaEl = card.querySelector("video, audio");
+      const imgEl = card.querySelector("img.mini-preview-img");
       const nameInput = card.querySelector('[data-preview-name="1"]');
       updateActivePreviewMetaText(metaBarEl, item, mediaEl, dict);
 
@@ -873,6 +887,21 @@ function renderSniffed() {
           updateActivePreviewMetaText(metaBarEl, item, mediaEl, dict);
         });
         mediaEl.addEventListener("error", () => {
+          if (metaBarEl) {
+            metaBarEl.textContent = dict.previewLoadError;
+          }
+        });
+      }
+
+      if (imgEl) {
+        imgEl.addEventListener("load", () => {
+          if (imgEl.naturalWidth > 0) {
+            item.width = imgEl.naturalWidth;
+            item.height = imgEl.naturalHeight;
+          }
+          updateActivePreviewMetaText(metaBarEl, item, null, dict);
+        });
+        imgEl.addEventListener("error", () => {
           if (metaBarEl) {
             metaBarEl.textContent = dict.previewLoadError;
           }
