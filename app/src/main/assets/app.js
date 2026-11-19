@@ -7,7 +7,8 @@ const I18N = {
     pasteTitle: "智能提取与粘贴",
     shareTipBadge: "支持系统分享直达",
     pastePlaceholder: "粘贴任意链接或带杂字的分享文案（如抖音、B站、直链、APK、压缩包）…",
-    pasteClipBtn: "📋 一键粘贴剪贴板",
+    pasteClipBtn: "📋 一键粘贴",
+    pasteAndSniffQuickBtn: "🌐 粘贴嗅探",
     clearInputBtn: "清空",
     extractBadgeNoise: "已自动过滤杂字提取纯链",
     extractBadgeClean: "已识别下载链接",
@@ -75,6 +76,7 @@ const I18N = {
     setUaLabel: "请求伪装标识 (User-Agent)",
     uaDesktopBtn: "桌面端 Chrome",
     uaMobileBtn: "移动端 Android",
+    setLangLabel: "界面语言 / Language",
     setPathLabel: "文件保存目录",
     setPathNote: "遵循 Android 公共下载目录规范，无需授予高危全盘读写权限，系统文件管理器直接可见。",
     navExtractLabel: "智能提取",
@@ -116,6 +118,7 @@ const I18N = {
     shareTipBadge: "System Share Supported",
     pastePlaceholder: "Paste any link or messy share text (mixed text + URL, MP4, APK, ZIP, PDF)…",
     pasteClipBtn: "📋 Paste Clipboard",
+    pasteAndSniffQuickBtn: "🌐 Paste & Sniff",
     clearInputBtn: "Clear",
     extractBadgeNoise: "Cleaned noise & extracted URL",
     extractBadgeClean: "URL Ready",
@@ -183,6 +186,7 @@ const I18N = {
     setUaLabel: "User-Agent Identity",
     uaDesktopBtn: "Desktop Chrome",
     uaMobileBtn: "Mobile Android",
+    setLangLabel: "Language / 界面语言",
     setPathLabel: "Public Save Folder",
     setPathNote: "Uses Android Scoped Storage Downloads collection cleanly — visible in any file manager without broad storage permissions.",
     navExtractLabel: "Extract",
@@ -339,6 +343,7 @@ function applyI18n() {
   syncText("shareTipBadge", dict.shareTipBadge);
   if ($("rawInput")) $("rawInput").placeholder = dict.pastePlaceholder;
   syncText("pasteClipBtn", dict.pasteClipBtn);
+  syncText("pasteAndSniffQuickBtn", dict.pasteAndSniffQuickBtn);
   syncText("clearInputBtn", dict.clearInputBtn);
   syncText("copyCleanUrlBtn", dict.copyCleanUrlBtn);
   syncText("fileNameLabel", dict.fileNameLabel);
@@ -381,6 +386,10 @@ function applyI18n() {
   syncText("setUaLabel", dict.setUaLabel);
   syncText("uaDesktopBtn", dict.uaDesktopBtn);
   syncText("uaMobileBtn", dict.uaMobileBtn);
+  syncText("setLangLabel", dict.setLangLabel);
+  document.querySelectorAll("#settingsLangSwitch .seg-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.lang === appState.lang);
+  });
   syncText("setPathLabel", dict.setPathLabel);
   syncText("setPathNote", dict.setPathNote);
 
@@ -1153,7 +1162,43 @@ window.onSniffedMediaUpdate = function onSniffedMediaUpdate(payload) {
   renderSniffed();
 };
 
+async function readClipboardAny() {
+  if (window.JoelNative) {
+    return window.JoelNative.getClipboardText() || "";
+  }
+  if (navigator.clipboard?.readText) {
+    try {
+      return await navigator.clipboard.readText();
+    } catch {}
+  }
+  return "";
+}
+
+function setAppLanguage(nextLang) {
+  const normalized = nextLang === "en" ? "en" : "zh";
+  appState.lang = normalized;
+  saveSettingsPatch({ lang: normalized });
+  applyI18n();
+}
+
 function bindEvents() {
+  // Global tactile haptic feedback for thumb-zone responsiveness
+  document.addEventListener(
+    "pointerdown",
+    (ev) => {
+      if (
+        ev.target &&
+        ev.target.closest &&
+        ev.target.closest(".btn, .nav-btn, .thread-pill, .seg-btn, .lang-btn, .sniff-checkbox")
+      ) {
+        if (window.JoelNative && window.JoelNative.hapticTick) {
+          window.JoelNative.hapticTick();
+        }
+      }
+    },
+    { passive: true }
+  );
+
   // Bottom Nav
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => window.switchTab(btn.dataset.tab));
@@ -1161,12 +1206,7 @@ function bindEvents() {
 
   // Top EN / 中文 Toggle
   document.querySelectorAll(".lang-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const nextLang = btn.dataset.lang === "en" ? "en" : "zh";
-      appState.lang = nextLang;
-      saveSettingsPatch({ lang: nextLang });
-      applyI18n();
-    });
+    btn.addEventListener("click", () => setAppLanguage(btn.dataset.lang));
   });
 
   // Smart Paste Input
@@ -1179,14 +1219,7 @@ function bindEvents() {
   });
 
   $("pasteClipBtn").addEventListener("click", async () => {
-    let text = "";
-    if (window.JoelNative) {
-      text = window.JoelNative.getClipboardText() || "";
-    } else if (navigator.clipboard?.readText) {
-      try {
-        text = await navigator.clipboard.readText();
-      } catch {}
-    }
+    const text = await readClipboardAny();
     if (!text.trim()) {
       showToast(t().toastClipboardEmpty);
       return;
@@ -1194,6 +1227,30 @@ function bindEvents() {
     $("rawInput").value = text;
     delete $("fileNameInput").dataset.userEdited;
     renderExtractor();
+  });
+
+  $("pasteAndSniffQuickBtn").addEventListener("click", async () => {
+    const text = await readClipboardAny();
+    if (!text.trim()) {
+      showToast(t().toastClipboardEmpty);
+      return;
+    }
+    $("rawInput").value = text;
+    delete $("fileNameInput").dataset.userEdited;
+    renderExtractor();
+    $("snifferUrlBox").value = text;
+    renderSnifferInput();
+    const res = resolveSnifferTarget(text);
+    if (!res.cleanUrl) {
+      showToast(t().toastSniffNoUrl);
+      return;
+    }
+    showToast(res.hadNoise ? t().toastExtractedSniff : t().launchSnifferBtn);
+    if (window.JoelNative) {
+      window.JoelNative.openBrowserSniffer(res.cleanUrl);
+    } else {
+      showToast(t().toastBrowserPreview);
+    }
   });
 
   $("clearInputBtn").addEventListener("click", () => {
@@ -1431,6 +1488,13 @@ function bindEvents() {
   document.querySelectorAll("#uaSwitch .seg-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
       saveSettingsPatch({ defaultUaMode: btn.dataset.ua });
+      showToast(t().toastSettingsSaved);
+    });
+  });
+
+  document.querySelectorAll("#settingsLangSwitch .seg-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setAppLanguage(btn.dataset.lang);
       showToast(t().toastSettingsSaved);
     });
   });

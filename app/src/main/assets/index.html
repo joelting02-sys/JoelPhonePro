@@ -37,200 +37,228 @@
     <main class="main-scroll">
       <!-- Tab 1: Smart Link Extractor -->
       <section class="tab-panel active" id="panel-extract">
-        <div class="card">
-          <div class="card-head">
-            <h2 class="card-title" id="pasteTitle">智能提取与粘贴</h2>
-            <span class="chip-soft" id="shareTipBadge">支持系统分享直达</span>
+        <div class="panel-body extract-body">
+          <!-- Quick Hint Card when input is empty -->
+          <div class="card tip-card" id="extractEmptyHint">
+            <div class="tip-row">
+              <span class="tip-icon">⚡</span>
+              <div>
+                <div class="tip-title" id="tip1Title">真 · 多线程 HTTP Range 分片加速</div>
+                <div class="tip-desc" id="tip1Desc">把大文件切分为 4~32 个字节分段并发拉取，断网暂停不丢分片进度。</div>
+              </div>
+            </div>
+            <div class="tip-row">
+              <span class="tip-icon">🧹</span>
+              <div>
+                <div class="tip-title" id="tip2Title">自动去杂字 + 手机系统「分享」接入</div>
+                <div class="tip-desc" id="tip2Desc">在微信、浏览器、B站点分享 → 选择 Joel Phone Pro，自动提取纯净下载链接。</div>
+              </div>
+            </div>
+            <div class="tip-row">
+              <span class="tip-icon">📂</span>
+              <div>
+                <div class="tip-title" id="tip3Title">统一存入手机 Download/JoelPhonePro/</div>
+                <div class="tip-desc" id="tip3Desc">下载完直接出现在系统文件管理器与下载目录，可一键打开或转发。</div>
+              </div>
+            </div>
           </div>
-          <textarea
-            id="rawInput"
-            class="paste-area"
-            rows="3"
-            placeholder="粘贴任意链接或带杂字的分享文案（如抖音、B站、直链、APK、压缩包）…"
-          ></textarea>
-          <div class="paste-toolbar">
-            <button type="button" class="btn btn-subtle flex-1" id="pasteClipBtn">📋 一键粘贴剪贴板</button>
-            <button type="button" class="btn btn-ghost" id="clearInputBtn">清空</button>
+
+          <div class="card" id="extractInputCard">
+            <div class="card-head">
+              <h2 class="card-title" id="pasteTitle">智能提取与粘贴</h2>
+              <span class="chip-soft" id="shareTipBadge">支持系统分享直达</span>
+            </div>
+            <textarea
+              id="rawInput"
+              class="paste-area"
+              rows="2"
+              placeholder="粘贴任意链接或带杂字的分享文案（如抖音、B站、直链、APK、压缩包）…"
+            ></textarea>
+          </div>
+
+          <!-- Extracted URL & Thread Config -->
+          <div class="card hidden" id="extractResultCard">
+            <div class="extract-banner">
+              <span class="badge-blue" id="extractBadge">已识别链接</span>
+              <button type="button" class="link-mini" id="copyCleanUrlBtn">复制纯链</button>
+            </div>
+            <div class="clean-url-box" id="cleanUrlPreview"></div>
+
+            <div class="field-group">
+              <label class="field-label" for="fileNameInput" id="fileNameLabel">保存文件名</label>
+              <input type="text" id="fileNameInput" class="text-input mono" placeholder="example.mp4" />
+            </div>
+
+            <button type="button" class="accordion-btn" id="toggleHeadersBtn">
+              <span id="toggleHeadersLabel">▸ 高级请求头 (Referer / Cookie 选填)</span>
+            </button>
+            <div class="headers-drawer hidden" id="headersDrawer">
+              <div class="field-group">
+                <label class="field-label" for="refererInput">Referer</label>
+                <input type="text" id="refererInput" class="text-input mono" placeholder="https://example.com/" />
+              </div>
+              <div class="field-group">
+                <label class="field-label" for="cookieInput">Cookie</label>
+                <input type="text" id="cookieInput" class="text-input mono" placeholder="key=value; ..." />
+              </div>
+            </div>
+
+            <div class="field-group">
+              <div class="field-label-row">
+                <span class="field-label" id="threadSelectLabel">并发线程数</span>
+                <span class="field-hint" id="threadHint">Range 多线程分片提速</span>
+              </div>
+              <div class="thread-grid" id="threadSelector">
+                <button type="button" class="thread-pill" data-threads="4">4 线程</button>
+                <button type="button" class="thread-pill" data-threads="8">8 线程</button>
+                <button type="button" class="thread-pill active" data-threads="16">16 线程<small>推荐</small></button>
+                <button type="button" class="thread-pill" data-threads="32">32 线程<small>极速</small></button>
+              </div>
+            </div>
+
+            <div class="cta-stack">
+              <button type="button" class="btn btn-primary btn-lg" id="startDownloadBtn">
+                ⚡ 开始多线程下载
+              </button>
+              <button type="button" class="btn btn-outline btn-md" id="openInSnifferBtn">
+                🌐 如果是网页，点此内置嗅探真实资源
+              </button>
+            </div>
           </div>
         </div>
 
-        <!-- Extracted URL & Thread Config -->
-        <div class="card hidden" id="extractResultCard">
-          <div class="extract-banner">
-            <span class="badge-blue" id="extractBadge">已识别链接</span>
-            <button type="button" class="link-mini" id="copyCleanUrlBtn">复制纯链</button>
-          </div>
-          <div class="clean-url-box" id="cleanUrlPreview"></div>
-
-          <div class="field-group">
-            <label class="field-label" for="fileNameInput" id="fileNameLabel">保存文件名</label>
-            <input type="text" id="fileNameInput" class="text-input mono" placeholder="example.mp4" />
-          </div>
-
-          <button type="button" class="accordion-btn" id="toggleHeadersBtn">
-            <span id="toggleHeadersLabel">▸ 高级请求头 (Referer / Cookie 选填)</span>
-          </button>
-          <div class="headers-drawer hidden" id="headersDrawer">
-            <div class="field-group">
-              <label class="field-label" for="refererInput">Referer</label>
-              <input type="text" id="refererInput" class="text-input mono" placeholder="https://example.com/" />
-            </div>
-            <div class="field-group">
-              <label class="field-label" for="cookieInput">Cookie</label>
-              <input type="text" id="cookieInput" class="text-input mono" placeholder="key=value; ..." />
-            </div>
-          </div>
-
-          <div class="field-group">
-            <div class="field-label-row">
-              <span class="field-label" id="threadSelectLabel">并发线程数</span>
-              <span class="field-hint" id="threadHint">Range 多线程分片提速</span>
-            </div>
-            <div class="thread-grid" id="threadSelector">
-              <button type="button" class="thread-pill" data-threads="4">4 线程</button>
-              <button type="button" class="thread-pill" data-threads="8">8 线程</button>
-              <button type="button" class="thread-pill active" data-threads="16">16 线程<small>推荐</small></button>
-              <button type="button" class="thread-pill" data-threads="32">32 线程<small>极速</small></button>
-            </div>
-          </div>
-
-          <div class="cta-stack">
-            <button type="button" class="btn btn-primary btn-lg" id="startDownloadBtn">
-              ⚡ 开始多线程下载
-            </button>
-            <button type="button" class="btn btn-outline btn-md" id="openInSnifferBtn">
-              🌐 如果是网页，点此内置嗅探真实资源
-            </button>
-          </div>
-        </div>
-
-        <!-- Quick Hint Card when input is empty -->
-        <div class="card tip-card" id="extractEmptyHint">
-          <div class="tip-row">
-            <span class="tip-icon">⚡</span>
-            <div>
-              <div class="tip-title" id="tip1Title">真 · 多线程 HTTP Range 分片加速</div>
-              <div class="tip-desc" id="tip1Desc">把大文件切分为 4~32 个字节分段并发拉取，断网暂停不丢分片进度。</div>
-            </div>
-          </div>
-          <div class="tip-row">
-            <span class="tip-icon">🧹</span>
-            <div>
-              <div class="tip-title" id="tip2Title">自动去杂字 + 手机系统「分享」接入</div>
-              <div class="tip-desc" id="tip2Desc">在微信、浏览器、B站点分享 → 选择 Joel Phone Pro，自动提取纯净下载链接。</div>
-            </div>
-          </div>
-          <div class="tip-row">
-            <span class="tip-icon">📂</span>
-            <div>
-              <div class="tip-title" id="tip3Title">统一存入手机 Download/JoelPhonePro/</div>
-              <div class="tip-desc" id="tip3Desc">下载完直接出现在系统文件管理器与下载目录，可一键打开或转发。</div>
-            </div>
+        <!-- Sticky Thumb Zone Dock -->
+        <div class="thumb-dock">
+          <div class="thumb-row">
+            <button type="button" class="btn btn-primary btn-thumb flex-1" id="pasteClipBtn">📋 一键粘贴剪贴板</button>
+            <button type="button" class="btn btn-subtle btn-thumb" id="pasteAndSniffQuickBtn">🌐 粘贴嗅探</button>
+            <button type="button" class="btn btn-ghost btn-thumb-icon" id="clearInputBtn">清空</button>
           </div>
         </div>
       </section>
 
       <!-- Tab 2: Downloads Queue -->
       <section class="tab-panel" id="panel-downloads">
-        <div class="filter-bar">
-          <div class="segmented" id="taskFilterSwitch">
-            <button type="button" class="seg-btn active" data-filter="all" id="filterAllBtn">全部</button>
-            <button type="button" class="seg-btn" data-filter="active" id="filterActiveBtn">进行中</button>
-            <button type="button" class="seg-btn" data-filter="done" id="filterDoneBtn">已完成</button>
-          </div>
-          <button type="button" class="btn btn-subtle btn-sm hidden" id="clearDoneBtn">清理已完成</button>
+        <div class="panel-body">
+          <div id="taskListContainer" class="task-list"></div>
         </div>
 
-        <div id="taskListContainer" class="task-list"></div>
+        <div class="thumb-dock downloads-dock">
+          <div class="filter-bar">
+            <div class="segmented" id="taskFilterSwitch">
+              <button type="button" class="seg-btn active" data-filter="all" id="filterAllBtn">全部</button>
+              <button type="button" class="seg-btn" data-filter="active" id="filterActiveBtn">进行中</button>
+              <button type="button" class="seg-btn" data-filter="done" id="filterDoneBtn">已完成</button>
+            </div>
+            <button type="button" class="btn btn-subtle btn-thumb-sm hidden" id="clearDoneBtn">清理已完成</button>
+          </div>
+        </div>
       </section>
 
       <!-- Tab 3: Native Web Media Sniffer -->
       <section class="tab-panel" id="panel-sniffer">
-        <div class="card">
-          <div class="card-head">
-            <h2 class="card-title" id="snifferTitle">内置网页媒体与资源嗅探</h2>
-            <span class="chip-soft" id="snifferSmartBadge">自动去杂字</span>
+        <div class="panel-body">
+          <div class="card sniffer-intro-card">
+            <div class="card-head">
+              <h2 class="card-title" id="snifferTitle">内置网页媒体与资源嗅探</h2>
+              <span class="chip-soft" id="snifferSmartBadge">自动去杂字</span>
+            </div>
+            <p class="card-desc" id="snifferDesc">
+              支持直接粘贴抖音 / 小红书 / B站整段分享文案或网页链接，自动剔除多余文字后打开内置浏览器嗅探真实视频与图集，支持下载前「预浏览」与全选批量下载。
+            </p>
           </div>
-          <p class="card-desc" id="snifferDesc">
-            支持直接粘贴抖音 / 小红书 / B站整段分享文案或网页链接，自动剔除多余文字后打开内置浏览器嗅探真实视频直链，并支持下载前「预浏览」确认内容。
-          </p>
-          <textarea
-            id="snifferUrlBox"
-            class="paste-area sniffer-paste-area"
-            rows="2"
-            placeholder="粘贴抖音/小红书分享文案（如：7.46 复制打开抖音… https://v.douyin.com/…）或网页链接…"
-          ></textarea>
+
+          <div class="section-subhead">
+            <span id="sniffedListTitle">已捕获资源</span>
+          </div>
+
+          <div id="sniffedListContainer" class="task-list"></div>
+        </div>
+
+        <div class="thumb-dock sniffer-dock">
+          <div class="sniff-batch-bar hidden" id="sniffBatchBar">
+            <button type="button" class="btn btn-subtle btn-thumb-sm" id="sniffSelectAllBtn">☑️ 全选本页</button>
+            <button type="button" class="btn btn-primary btn-thumb-sm flex-1" id="sniffBatchDownloadBtn" disabled>⚡ 批量下载选中 (0)</button>
+          </div>
+
+          <div class="sniff-filter-row" id="sniffTypeFilterSwitch">
+            <button type="button" class="seg-btn filter-chip active" data-type="all" id="sniffFilterAllBtn">全部</button>
+            <button type="button" class="seg-btn filter-chip" data-type="video" id="sniffFilterVideoBtn">🎬 视频</button>
+            <button type="button" class="seg-btn filter-chip" data-type="audio" id="sniffFilterAudioBtn">🎵 音频</button>
+            <button type="button" class="seg-btn filter-chip" data-type="image" id="sniffFilterImageBtn">🖼️ 图片</button>
+            <button type="button" class="seg-btn filter-chip" data-type="file" id="sniffFilterFileBtn">📦 文件</button>
+            <button type="button" class="btn btn-ghost filter-chip-btn" id="clearSniffedBtn">清空</button>
+          </div>
+
           <div class="sniffer-clean-preview hidden" id="snifferCleanPreviewWrap">
             <div class="sniffer-clean-head">
               <span class="badge-blue" id="snifferExtractBadge">已自动过滤杂字</span>
             </div>
             <div class="clean-url-box compact" id="snifferCleanUrlText"></div>
           </div>
-          <div class="sniffer-actions-row">
-            <button type="button" class="btn btn-primary flex-1" id="snifferPasteGoBtn">📋 粘贴并嗅探</button>
-            <button type="button" class="btn btn-subtle" id="launchSnifferBtn">🌐 打开嗅探</button>
-            <button type="button" class="btn btn-ghost" id="snifferClearInputBtn">清空</button>
+
+          <textarea
+            id="snifferUrlBox"
+            class="paste-area sniffer-paste-area"
+            rows="2"
+            placeholder="粘贴抖音/小红书分享文案（如：7.46 复制打开抖音… https://v.douyin.com/…）或网页链接…"
+          ></textarea>
+
+          <div class="thumb-row">
+            <button type="button" class="btn btn-primary btn-thumb flex-1" id="snifferPasteGoBtn">📋 粘贴并嗅探</button>
+            <button type="button" class="btn btn-subtle btn-thumb" id="launchSnifferBtn">🌐 打开嗅探</button>
+            <button type="button" class="btn btn-ghost btn-thumb-icon" id="snifferClearInputBtn">清空</button>
           </div>
         </div>
-
-        <div class="section-subhead">
-          <span id="sniffedListTitle">已捕获资源</span>
-          <button type="button" class="link-mini" id="clearSniffedBtn">清空列表</button>
-        </div>
-
-        <div class="sniff-filter-row" id="sniffTypeFilterSwitch">
-          <button type="button" class="seg-btn filter-chip active" data-type="all" id="sniffFilterAllBtn">全部</button>
-          <button type="button" class="seg-btn filter-chip" data-type="video" id="sniffFilterVideoBtn">🎬 视频</button>
-          <button type="button" class="seg-btn filter-chip" data-type="audio" id="sniffFilterAudioBtn">🎵 音频</button>
-          <button type="button" class="seg-btn filter-chip" data-type="image" id="sniffFilterImageBtn">🖼️ 图片</button>
-          <button type="button" class="seg-btn filter-chip" data-type="file" id="sniffFilterFileBtn">📦 文件</button>
-        </div>
-
-        <div class="sniff-batch-bar hidden" id="sniffBatchBar">
-          <button type="button" class="btn btn-subtle btn-sm" id="sniffSelectAllBtn">☑️ 全选本页</button>
-          <button type="button" class="btn btn-primary btn-sm flex-1" id="sniffBatchDownloadBtn" disabled>⚡ 批量下载选中 (0)</button>
-        </div>
-
-        <div id="sniffedListContainer" class="task-list"></div>
       </section>
 
       <!-- Tab 4: Settings -->
       <section class="tab-panel" id="panel-settings">
-        <div class="card">
-          <h2 class="card-title" id="settingsHeading">下载引擎设置</h2>
+        <div class="panel-body extract-body">
+          <div class="card">
+            <h2 class="card-title" id="settingsHeading">下载引擎设置</h2>
 
-          <div class="setting-block">
-            <div class="setting-label" id="setDefaultThreadsLabel">默认并发线程数</div>
-            <div class="thread-grid" id="defaultThreadsGrid">
-              <button type="button" class="thread-pill" data-threads="4">4</button>
-              <button type="button" class="thread-pill" data-threads="8">8</button>
-              <button type="button" class="thread-pill active" data-threads="16">16</button>
-              <button type="button" class="thread-pill" data-threads="32">32</button>
+            <div class="setting-block">
+              <div class="setting-label" id="setDefaultThreadsLabel">默认并发线程数</div>
+              <div class="thread-grid" id="defaultThreadsGrid">
+                <button type="button" class="thread-pill" data-threads="4">4</button>
+                <button type="button" class="thread-pill" data-threads="8">8</button>
+                <button type="button" class="thread-pill active" data-threads="16">16</button>
+                <button type="button" class="thread-pill" data-threads="32">32</button>
+              </div>
             </div>
-          </div>
 
-          <div class="setting-block">
-            <div class="setting-label" id="setConcurrentLabel">同时运行任务上限</div>
-            <div class="thread-grid" id="concurrentLimitGrid">
-              <button type="button" class="thread-pill" data-limit="1">1</button>
-              <button type="button" class="thread-pill active" data-limit="2">2</button>
-              <button type="button" class="thread-pill" data-limit="3">3</button>
-              <button type="button" class="thread-pill" data-limit="5">5</button>
+            <div class="setting-block">
+              <div class="setting-label" id="setConcurrentLabel">同时运行任务上限</div>
+              <div class="thread-grid" id="concurrentLimitGrid">
+                <button type="button" class="thread-pill" data-limit="1">1</button>
+                <button type="button" class="thread-pill active" data-limit="2">2</button>
+                <button type="button" class="thread-pill" data-limit="3">3</button>
+                <button type="button" class="thread-pill" data-limit="5">5</button>
+              </div>
             </div>
-          </div>
 
-          <div class="setting-block">
-            <div class="setting-label" id="setUaLabel">请求伪装标识 (User-Agent)</div>
-            <div class="segmented full-width" id="uaSwitch">
-              <button type="button" class="seg-btn active" data-ua="desktop" id="uaDesktopBtn">桌面端 Chrome</button>
-              <button type="button" class="seg-btn" data-ua="mobile" id="uaMobileBtn">移动端 Android</button>
+            <div class="setting-block">
+              <div class="setting-label" id="setUaLabel">请求伪装标识 (User-Agent)</div>
+              <div class="segmented full-width" id="uaSwitch">
+                <button type="button" class="seg-btn active" data-ua="desktop" id="uaDesktopBtn">桌面端 Chrome</button>
+                <button type="button" class="seg-btn" data-ua="mobile" id="uaMobileBtn">移动端 Android</button>
+              </div>
             </div>
-          </div>
 
-          <div class="setting-block save-path-box">
-            <div class="setting-label" id="setPathLabel">文件保存目录</div>
-            <div class="mono path-value" id="savePathValue">Download/JoelPhonePro/</div>
-            <div class="setting-note" id="setPathNote">遵循 Android 公共下载目录规范，无需授予高危全盘读写权限，系统文件管理器直接可见。</div>
+            <div class="setting-block">
+              <div class="setting-label" id="setLangLabel">界面语言 / Language</div>
+              <div class="segmented full-width" id="settingsLangSwitch">
+                <button type="button" class="seg-btn active" data-lang="zh">简体中文</button>
+                <button type="button" class="seg-btn" data-lang="en">English</button>
+              </div>
+            </div>
+
+            <div class="setting-block save-path-box">
+              <div class="setting-label" id="setPathLabel">文件保存目录</div>
+              <div class="mono path-value" id="savePathValue">Download/JoelPhonePro/</div>
+              <div class="setting-note" id="setPathNote">遵循 Android 公共下载目录规范，无需授予高危全盘读写权限，系统文件管理器直接可见。</div>
+            </div>
           </div>
         </div>
       </section>

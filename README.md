@@ -19,7 +19,7 @@ Mobile-first Android multi-threaded downloader and smart media sniffer built in 
 
 ## Download
 
-Get the pre-built APK from [GitHub Releases](https://github.com/joelting02-sys/JoelPhonePro/releases) or `apk/JoelPhonePro-v1.3.0.apk`.
+Get the pre-built APK from [GitHub Releases](https://github.com/joelting02-sys/JoelPhonePro/releases) or `apk/JoelPhonePro-v1.4.0.apk`.
 
 ## Build
 

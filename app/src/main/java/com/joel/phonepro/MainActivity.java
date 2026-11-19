@@ -405,24 +405,25 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         snifferOverlay.setBackgroundColor(Color.WHITE);
         snifferOverlay.setVisibility(View.GONE);
 
-        // Toolbar
+        // Bottom-Docked Thumb Toolbar
         LinearLayout bar = new LinearLayout(this);
         bar.setOrientation(LinearLayout.HORIZONTAL);
         bar.setGravity(Gravity.CENTER_VERTICAL);
-        bar.setPadding(dp(8), dp(8), dp(8), dp(8));
+        bar.setPadding(dp(10), dp(8), dp(10), dp(8));
         bar.setBackgroundColor(Color.WHITE);
 
         Button closeBtn = new Button(this);
         closeBtn.setText("←");
-        closeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        closeBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
         closeBtn.setTextColor(Color.parseColor("#0F172A"));
-        closeBtn.setBackground(pillBg("#F3F4F6", 10));
+        closeBtn.setBackground(pillBg("#F3F4F6", 12));
         closeBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(36), dp(36));
-        closeLp.rightMargin = dp(5);
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(dp(40), dp(42));
+        closeLp.rightMargin = dp(6);
         closeBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                triggerHaptic();
                 closeSnifferOverlay();
             }
         });
@@ -435,8 +436,8 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         snifferUrlInput.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         snifferUrlInput.setTextColor(Color.parseColor("#0F172A"));
         snifferUrlInput.setHint("https://...");
-        snifferUrlInput.setPadding(dp(8), dp(5), dp(8), dp(5));
-        snifferUrlInput.setBackground(pillBg("#F8F9FA", 10));
+        snifferUrlInput.setPadding(dp(10), dp(6), dp(10), dp(6));
+        snifferUrlInput.setBackground(pillBg("#F8F9FA", 12));
         snifferUrlInput.setOnEditorActionListener(new TextView.OnEditorActionListener() {
             @Override
             public boolean onEditorAction(TextView v, int actionId, KeyEvent event) {
@@ -447,21 +448,22 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 return false;
             }
         });
-        LinearLayout.LayoutParams urlLp = new LinearLayout.LayoutParams(0, dp(36), 1f);
-        urlLp.rightMargin = dp(5);
+        LinearLayout.LayoutParams urlLp = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        urlLp.rightMargin = dp(6);
         bar.addView(snifferUrlInput, urlLp);
 
         Button pasteBtn = new Button(this);
         pasteBtn.setText("📋");
-        pasteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        pasteBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
         pasteBtn.setTextColor(Color.parseColor("#0F172A"));
-        pasteBtn.setBackground(pillBg("#F3F4F6", 10));
+        pasteBtn.setBackground(pillBg("#F3F4F6", 12));
         pasteBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(dp(34), dp(36));
-        pasteLp.rightMargin = dp(5);
+        LinearLayout.LayoutParams pasteLp = new LinearLayout.LayoutParams(dp(40), dp(42));
+        pasteLp.rightMargin = dp(6);
         pasteBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                triggerHaptic();
                 String clip = readClipboardSync();
                 String clean = extractCleanUrlFromText(clip);
                 if (!clean.isEmpty()) {
@@ -476,15 +478,16 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
 
         snifferUaBtn = new Button(this);
         snifferUaBtn.setText("📱");
-        snifferUaBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        snifferUaBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         snifferUaBtn.setTextColor(Color.parseColor("#1D4ED8"));
-        snifferUaBtn.setBackground(pillBg("#EFF6FF", 10));
+        snifferUaBtn.setBackground(pillBg("#EFF6FF", 12));
         snifferUaBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams uaLp = new LinearLayout.LayoutParams(dp(34), dp(36));
-        uaLp.rightMargin = dp(5);
+        LinearLayout.LayoutParams uaLp = new LinearLayout.LayoutParams(dp(40), dp(42));
+        uaLp.rightMargin = dp(6);
         snifferUaBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                triggerHaptic();
                 applySnifferUa(!snifferUseMobileUa);
                 Toast.makeText(
                         MainActivity.this,
@@ -499,15 +502,16 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
 
         Button scanNowBtn = new Button(this);
         scanNowBtn.setText("🔍");
-        scanNowBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        scanNowBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
         scanNowBtn.setTextColor(Color.parseColor("#1D4ED8"));
-        scanNowBtn.setBackground(pillBg("#EFF6FF", 10));
+        scanNowBtn.setBackground(pillBg("#EFF6FF", 12));
         scanNowBtn.setPadding(0, 0, 0, 0);
-        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(34), dp(36));
-        scanLp.rightMargin = dp(5);
+        LinearLayout.LayoutParams scanLp = new LinearLayout.LayoutParams(dp(40), dp(42));
+        scanLp.rightMargin = dp(6);
         scanNowBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                triggerHaptic();
                 Toast.makeText(MainActivity.this, "正在扫描本页视频与图片…", Toast.LENGTH_SHORT).show();
                 injectDomMediaScanner(snifferWebView, true);
             }
@@ -516,21 +520,22 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
 
         snifferCountBadge = new TextView(this);
         snifferCountBadge.setText("0");
-        snifferCountBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        snifferCountBadge.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         snifferCountBadge.setTypeface(Typeface.DEFAULT_BOLD);
         snifferCountBadge.setTextColor(Color.WHITE);
         snifferCountBadge.setGravity(Gravity.CENTER);
-        snifferCountBadge.setPadding(dp(9), dp(4), dp(9), dp(4));
+        snifferCountBadge.setPadding(dp(11), dp(4), dp(11), dp(4));
         snifferCountBadge.setBackground(pillBg("#2563EB", 14));
         snifferCountBadge.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                triggerHaptic();
                 closeSnifferOverlay();
                 mainWebView.evaluateJavascript("window.switchTab && window.switchTab('sniffer');", null);
             }
         });
         LinearLayout.LayoutParams badgeLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(34));
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(42));
         bar.addView(snifferCountBadge, badgeLp);
 
         View divider = new View(this);
@@ -636,41 +641,42 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
 
         Button popupCloseBtn = new Button(this);
         popupCloseBtn.setText("✕ 关闭");
-        popupCloseBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 11);
+        popupCloseBtn.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         popupCloseBtn.setTextColor(Color.parseColor("#334155"));
-        popupCloseBtn.setBackground(pillBg("#E2E8F0", 8));
-        popupCloseBtn.setPadding(dp(10), 0, dp(10), 0);
+        popupCloseBtn.setBackground(pillBg("#E2E8F0", 10));
+        popupCloseBtn.setPadding(dp(12), 0, dp(12), 0);
         popupCloseBtn.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
+                triggerHaptic();
                 closePopupWindow();
             }
         });
         popupBar.addView(popupCloseBtn, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, dp(30)));
+                ViewGroup.LayoutParams.WRAP_CONTENT, dp(36)));
 
         View popupDivider = new View(this);
         popupDivider.setBackgroundColor(Color.parseColor("#E2E8F0"));
 
         popupWebSlot = new FrameLayout(this);
-        popupOverlay.addView(popupBar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        popupOverlay.addView(popupDivider, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
         popupOverlay.addView(popupWebSlot, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        popupOverlay.addView(popupDivider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        popupOverlay.addView(popupBar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         snifferWebContainer.addView(snifferWebView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         snifferWebContainer.addView(popupOverlay, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        snifferOverlay.addView(bar, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        snifferOverlay.addView(divider, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
         snifferOverlay.addView(snifferWebContainer, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        snifferOverlay.addView(divider, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(1)));
+        snifferOverlay.addView(bar, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -2091,5 +2097,21 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         public void openBrowserSniffer(String url) {
             openSnifferOverlay(url);
         }
+
+        @JavascriptInterface
+        public void hapticTick() {
+            triggerHaptic();
+        }
+    }
+
+    private void triggerHaptic() {
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                if (rootLayout != null) {
+                    rootLayout.performHapticFeedback(android.view.HapticFeedbackConstants.VIRTUAL_KEY);
+                }
+            }
+        });
     }
 }
