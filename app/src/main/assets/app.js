@@ -64,6 +64,11 @@ const I18N = {
     sizeProbing: "探测大小中…",
     toastExtractedSniff: "已剔除杂字提取链接，正在打开嗅探",
     toastSniffNoUrl: "未检测到有效 http/https 链接，请检查粘贴内容",
+    sniffSelectAll: "☑️ 全选本页",
+    sniffDeselectAll: "☐ 取消全选",
+    sniffBatchDownload: (n) => `⚡ 批量下载选中 (${n})`,
+    toastBatchStarted: (n) => `已批量启动 ${n} 个多线程下载任务`,
+    toastSelectOneFirst: "请先勾选至少一个要下载的资源",
     settingsHeading: "下载引擎设置",
     setDefaultThreadsLabel: "默认并发线程数",
     setConcurrentLabel: "同时运行任务上限",
@@ -167,6 +172,11 @@ const I18N = {
     sizeProbing: "Probing size…",
     toastExtractedSniff: "Cleaned share text & opening sniffer",
     toastSniffNoUrl: "No valid http/https URL detected in input",
+    sniffSelectAll: "☑️ Select All",
+    sniffDeselectAll: "☐ Deselect All",
+    sniffBatchDownload: (n) => `⚡ Download Selected (${n})`,
+    toastBatchStarted: (n) => `Started ${n} batch download tasks`,
+    toastSelectOneFirst: "Select at least one resource first",
     settingsHeading: "Engine Settings",
     setDefaultThreadsLabel: "Default Thread Count",
     setConcurrentLabel: "Max Concurrent Downloads",
@@ -216,6 +226,7 @@ const appState = {
   filter: "all",
   sniffTypeFilter: "all",
   activePreviewUrl: null,
+  selectedSniffUrls: new Set(),
   selectedThreads: 16,
   headersExpanded: false,
   extractedUrl: "",
@@ -745,6 +756,45 @@ function updateActivePreviewMetaText(metaBarEl, item, videoEl, dict) {
   metaBarEl.textContent = parts.length ? parts.join(" · ") : dict.previewLoading;
 }
 
+function getFilteredSniffed() {
+  return (appState.sniffed || [])
+    .filter((item) => matchesSniffFilter(item, appState.sniffTypeFilter))
+    .slice()
+    .sort((a, b) => {
+      const pa = sniffSortPriority(a);
+      const pb = sniffSortPriority(b);
+      if (pa !== pb) return pb - pa;
+      return (b.capturedAt || 0) - (a.capturedAt || 0);
+    });
+}
+
+function updateSniffBatchBar(filtered) {
+  const dict = t();
+  const bar = $("sniffBatchBar");
+  const selectAllBtn = $("sniffSelectAllBtn");
+  const batchBtn = $("sniffBatchDownloadBtn");
+  if (!bar || !selectAllBtn || !batchBtn) return;
+
+  if (!filtered || !filtered.length) {
+    bar.classList.add("hidden");
+    return;
+  }
+
+  bar.classList.remove("hidden");
+  let selectedInFilter = 0;
+  for (const item of filtered) {
+    if (appState.selectedSniffUrls.has(item.url)) {
+      selectedInFilter++;
+    }
+  }
+  const allSelected = selectedInFilter > 0 && selectedInFilter === filtered.length;
+  selectAllBtn.textContent = allSelected ? dict.sniffDeselectAll : dict.sniffSelectAll;
+
+  const totalSelected = appState.selectedSniffUrls.size;
+  batchBtn.textContent = dict.sniffBatchDownload(totalSelected);
+  batchBtn.disabled = totalSelected === 0;
+}
+
 function renderSniffed() {
   const dict = t();
   const list = appState.sniffed || [];
@@ -762,19 +812,13 @@ function renderSniffed() {
 
   const box = $("sniffedListContainer");
   if (!list.length) {
+    updateSniffBatchBar([]);
     box.innerHTML = `<div class="card empty-card">${escapeHtml(dict.emptySniffed)}</div>`;
     return;
   }
 
-  const filtered = list
-    .filter((item) => matchesSniffFilter(item, appState.sniffTypeFilter))
-    .slice()
-    .sort((a, b) => {
-      const pa = sniffSortPriority(a);
-      const pb = sniffSortPriority(b);
-      if (pa !== pb) return pb - pa;
-      return (b.capturedAt || 0) - (a.capturedAt || 0);
-    });
+  const filtered = getFilteredSniffed();
+  updateSniffBatchBar(filtered);
 
   if (!filtered.length) {
     box.innerHTML = `<div class="card empty-card">${escapeHtml(dict.emptySniffedFiltered)}</div>`;
@@ -785,6 +829,7 @@ function renderSniffed() {
   for (const item of filtered) {
     const fileName = deriveSniffedFileName(item);
     const isPreviewOpen = appState.activePreviewUrl === item.url;
+    const isChecked = appState.selectedSniffUrls.has(item.url);
     const previewSrc = item.previewUrl || item.url;
     const mt = item.mediaType || "video";
     const card = document.createElement("div");
@@ -794,6 +839,11 @@ function renderSniffed() {
     try {
       host = new URL(item.url).hostname;
     } catch {}
+
+    const thumbHtml =
+      mt === "image" && !isPreviewOpen
+        ? `<div class="sniff-thumb-strip" data-sniff-thumb="1"><img class="sniff-inline-thumb" loading="lazy" src="${escapeHtml(previewSrc)}" alt="thumb" /></div>`
+        : "";
 
     let previewDrawerHtml = "";
     if (isPreviewOpen) {
@@ -822,12 +872,16 @@ function renderSniffed() {
     card.innerHTML = `
       <div class="task-top">
         <div class="task-title-wrap">
+          <label class="sniff-check-wrap">
+            <input type="checkbox" class="sniff-checkbox" data-sniff-check="1" ${isChecked ? "checked" : ""} />
+          </label>
           <span class="ext-badge" data-sniff-ext="1">${escapeHtml(inferExtBadge(fileName))}</span>
           <span class="task-name" data-sniff-title="1">${escapeHtml(fileName)}</span>
         </div>
         <span class="chip-soft">${escapeHtml(host)}</span>
       </div>
       <div class="sniff-meta-row" data-sniff-meta="1">${buildSniffMetaPillsHtml(item, dict)}</div>
+      ${thumbHtml}
       <div class="sniff-url">${escapeHtml(item.url)}</div>
       <div class="task-actions">
         <button type="button" class="btn ${isPreviewOpen ? "btn-preview-active" : "btn-subtle"} btn-sm" data-sniff-act="preview">${escapeHtml(isPreviewOpen ? dict.btnPreviewClose : dict.btnPreviewOpen)}</button>
@@ -836,6 +890,23 @@ function renderSniffed() {
       </div>
       ${previewDrawerHtml}
     `;
+
+    card.querySelector('[data-sniff-check="1"]').addEventListener("change", (ev) => {
+      if (ev.target.checked) {
+        appState.selectedSniffUrls.add(item.url);
+      } else {
+        appState.selectedSniffUrls.delete(item.url);
+      }
+      updateSniffBatchBar(getFilteredSniffed());
+    });
+
+    const thumbEl = card.querySelector('[data-sniff-thumb="1"]');
+    if (thumbEl) {
+      thumbEl.addEventListener("click", () => {
+        appState.activePreviewUrl = item.url;
+        renderSniffed();
+      });
+    }
 
     card.querySelector('[data-sniff-act="preview"]').addEventListener("click", () => {
       appState.activePreviewUrl = isPreviewOpen ? null : item.url;
@@ -1044,6 +1115,7 @@ window.onSniffedMediaUpdate = function onSniffedMediaUpdate(payload) {
 
   if (payload.invalid) {
     appState.sniffed.splice(idx, 1);
+    appState.selectedSniffUrls.delete(payload.url);
     if (appState.activePreviewUrl === payload.url) {
       appState.activePreviewUrl = null;
     }
@@ -1274,8 +1346,71 @@ function bindEvents() {
 
   $("clearSniffedBtn").addEventListener("click", () => {
     appState.sniffed = [];
+    appState.selectedSniffUrls.clear();
     appState.activePreviewUrl = null;
     renderSniffed();
+  });
+
+  $("sniffSelectAllBtn").addEventListener("click", () => {
+    const filtered = getFilteredSniffed();
+    if (!filtered.length) return;
+    const allSelected = filtered.every((item) => appState.selectedSniffUrls.has(item.url));
+    if (allSelected) {
+      for (const item of filtered) {
+        appState.selectedSniffUrls.delete(item.url);
+      }
+    } else {
+      for (const item of filtered) {
+        appState.selectedSniffUrls.add(item.url);
+      }
+    }
+    renderSniffed();
+  });
+
+  $("sniffBatchDownloadBtn").addEventListener("click", () => {
+    const dict = t();
+    const selectedItems = (appState.sniffed || []).filter((item) =>
+      appState.selectedSniffUrls.has(item.url)
+    );
+    if (!selectedItems.length) {
+      showToast(dict.toastSelectOneFirst);
+      return;
+    }
+    if (!window.JoelNative) {
+      showToast(dict.toastBrowserPreview);
+      return;
+    }
+    const nameCounts = new Map();
+    let started = 0;
+    for (const item of selectedItems) {
+      let fn = deriveSniffedFileName(item);
+      const count = (nameCounts.get(fn) || 0) + 1;
+      nameCounts.set(fn, count);
+      if (count > 1) {
+        const dot = fn.lastIndexOf(".");
+        fn = dot > 0 ? `${fn.slice(0, dot)}_${count}${fn.slice(dot)}` : `${fn}_${count}`;
+      }
+      const resRaw = window.JoelNative.startDownload(
+        item.url,
+        fn,
+        appState.selectedThreads,
+        item.referer || "",
+        item.cookie || "",
+        item.uaMode || appState.settings.defaultUaMode || "desktop"
+      );
+      try {
+        const parsed = JSON.parse(resRaw || "{}");
+        if (parsed.ok) started++;
+      } catch {
+        started++;
+      }
+    }
+    appState.selectedSniffUrls.clear();
+    renderSniffed();
+    if (started > 0) {
+      showToast(dict.toastBatchStarted(started));
+      window.switchTab("downloads");
+    }
   });
 
   // Settings Tab

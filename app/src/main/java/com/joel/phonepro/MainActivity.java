@@ -88,6 +88,11 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             "filename\\*?=(?:UTF-8''|\"?)([^\";]+)",
             Pattern.CASE_INSENSITIVE);
     private static final Pattern CHROME_VERSION_PATTERN = Pattern.compile("Chrome/([0-9.]+)");
+    private static final Pattern RENDER_DATA_PATTERN = Pattern.compile(
+            "<script[^>]*id=[\"']RENDER_DATA[\"'][^>]*>([^<]+)</script>",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern DOUYIN_VIDEO_ID_PATTERN = Pattern.compile(
+            "\"uri\"\\s*:\\s*\"(v0[0-9a-zA-Z_]{16,40})\"");
 
     private String mobileUa = MOBILE_UA_FALLBACK;
     private String desktopUa = DESKTOP_UA_FALLBACK;
@@ -504,7 +509,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             @Override
             public void onClick(View v) {
                 Toast.makeText(MainActivity.this, "正在扫描本页视频与图片…", Toast.LENGTH_SHORT).show();
-                injectDomMediaScanner(snifferWebView);
+                injectDomMediaScanner(snifferWebView, true);
             }
         });
         bar.addView(scanNowBtn, scanLp);
@@ -575,7 +580,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     snifferUrlInput.setText(url);
                 }
                 CookieManager.getInstance().flush();
-                injectDomMediaScanner(view);
+                injectDomMediaScanner(view, true);
             }
 
             @Override
@@ -766,12 +771,22 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
         return "";
     }
 
-    private void injectDomMediaScanner(final WebView view) {
+    private void injectDomMediaScanner(final WebView view, final boolean forceHtmlScan) {
         if (view == null) return;
         final String js = "(function(){"
                 + "if(!window.__joelSentUrls){window.__joelSentUrls={};}"
+                + "var forceHtml=" + (forceHtmlScan ? "true" : "false") + ";"
+                + "function isIgnoredUrl(u){"
+                + "return /(avatar|icon|emoji|logo|favicon|qrcode|100x100|c50x50|c60x60|\\.svg)/i.test(u);"
+                + "}"
+                + "function isTwitterInitChunk(u){"
+                + "var l=u.toLowerCase();"
+                + "if(l.indexOf('video.twimg.com')>=0&&(l.indexOf('/aud/')>=0||l.indexOf('/0/0/')>=0||l.indexOf('init.mp4')>=0||l.indexOf('.m4s')>=0))return true;"
+                + "return false;"
+                + "}"
                 + "function sendMedia(u,kind,title,w,h,dur){"
                 + "if(!u||u.indexOf('http')!==0)return;"
+                + "if(isTwitterInitChunk(u))return;"
                 + "var key=kind+':'+u;"
                 + "if(window.__joelSentUrls[key])return;"
                 + "window.__joelSentUrls[key]=1;"
@@ -779,7 +794,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "}"
                 + "function sendImage(u,title,w,h){"
                 + "if(!u||u.indexOf('http')!==0)return;"
-                + "if(/(avatar|icon|emoji|logo|qrcode|100x100|c50x50|c60x60|\\.svg)/i.test(u))return;"
+                + "if(isIgnoredUrl(u))return;"
                 + "var key='img:'+u;"
                 + "if(window.__joelSentUrls[key])return;"
                 + "window.__joelSentUrls[key]=1;"
@@ -795,13 +810,33 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "visited++;"
                 + "if(typeof o.desc==='string'&&o.desc.trim())ttl=o.desc.trim();"
                 + "else if(typeof o.item_title==='string'&&o.item_title.trim())ttl=o.item_title.trim();"
-                + "if(o.play_addr&&typeof o.play_addr==='object'){"
-                + "if(typeof o.play_addr.uri==='string'&&o.play_addr.uri.length>4&&o.play_addr.uri.indexOf('http')!==0){"
-                + "sendMedia('https://aweme.snssdk.com/aweme/v1/play/?video_id='+encodeURIComponent(o.play_addr.uri)+'&ratio=1080p&line=0','video',ttl,Number(o.width||0),Number(o.height||0),-1);"
+                + "else if(typeof o.full_text==='string'&&o.full_text.trim())ttl=o.full_text.trim();"
+                + "else if(typeof o.text==='string'&&o.text.trim())ttl=o.text.trim();"
+                + "else if(o.legacy&&typeof o.legacy.full_text==='string'&&o.legacy.full_text.trim())ttl=o.legacy.full_text.trim();"
+                + "if(o.video_info&&Array.isArray(o.video_info.variants)){"
+                + "var mp4Vars=[];var hlsVars=[];"
+                + "for(var vi=0;vi<o.video_info.variants.length;vi++){"
+                + "var vr=o.video_info.variants[vi];"
+                + "if(!vr||typeof vr.url!=='string'||vr.url.indexOf('http')!==0)continue;"
+                + "if(vr.content_type==='video/mp4'||vr.url.indexOf('.mp4')>=0)mp4Vars.push(vr);"
+                + "else if(vr.url.indexOf('.m3u8')>=0)hlsVars.push(vr);"
                 + "}"
-                + "if(Array.isArray(o.play_addr.url_list)){"
-                + "for(var i=0;i<o.play_addr.url_list.length;i++){"
-                + "var vu=o.play_addr.url_list[i];"
+                + "mp4Vars.sort(function(a,b){return Number(b.bitrate||0)-Number(a.bitrate||0);});"
+                + "for(var mi=0;mi<mp4Vars.length;mi++){sendMedia(mp4Vars[mi].url,'video',ttl,0,0,-1);}"
+                + "if(!mp4Vars.length&&hlsVars.length){sendMedia(hlsVars[0].url,'video',ttl,0,0,-1);}"
+                + "}"
+                + "if(typeof o.media_url_https==='string'&&o.media_url_https.indexOf('https://pbs.twimg.com/media/')===0){"
+                + "var xImg=o.media_url_https.indexOf('?')>=0?o.media_url_https:(o.media_url_https+'?format=jpg&name=large');"
+                + "sendImage(xImg,ttl,0,0);"
+                + "}"
+                + "var pa=o.play_addr||(o.video&&o.video.play_addr);"
+                + "if(pa&&typeof pa==='object'){"
+                + "if(typeof pa.uri==='string'&&pa.uri.length>4&&pa.uri.indexOf('http')!==0){"
+                + "sendMedia('https://www.iesdouyin.com/aweme/v1/play/?video_id='+encodeURIComponent(pa.uri)+'&ratio=1080p&line=0','video',ttl,Number(o.width||0),Number(o.height||0),-1);"
+                + "}"
+                + "if(Array.isArray(pa.url_list)){"
+                + "for(var i=0;i<pa.url_list.length;i++){"
+                + "var vu=pa.url_list[i];"
                 + "if(typeof vu==='string'&&vu.indexOf('http')===0){"
                 + "sendMedia(vu.replace('/playwm/','/play/'),'video',ttl,Number(o.width||0),Number(o.height||0),-1);"
                 + "break;"
@@ -809,10 +844,11 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "}"
                 + "}"
                 + "}"
-                + "if(Array.isArray(o.images)){"
-                + "for(var j=0;j<o.images.length;j++){"
-                + "var im=o.images[j];if(!im||typeof im!=='object')continue;"
-                + "var list=(im.display_image&&im.display_image.url_list)||im.url_list;"
+                + "var imgsList=o.images||(o.image_post_info&&o.image_post_info.images);"
+                + "if(Array.isArray(imgsList)){"
+                + "for(var j=0;j<imgsList.length;j++){"
+                + "var im=imgsList[j];if(!im||typeof im!=='object')continue;"
+                + "var list=(im.display_image&&im.display_image.url_list)||(im.owner_watermark_image&&im.owner_watermark_image.url_list)||im.url_list;"
                 + "if(Array.isArray(list)&&list.length){"
                 + "var picked=list[list.length-1]||list[0];"
                 + "if(typeof picked==='string'&&picked.indexOf('http')===0){sendImage(picked,ttl,Number(im.width||0),Number(im.height||0));}"
@@ -830,7 +866,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "}"
                 + "}"
                 + "}"
-                + "window.__joelScanMedia=function(){"
+                + "window.__joelScanMedia=function(triggerHtml){"
                 + "try{"
                 + "var docTitle=(document.title||'').trim();"
                 + "var els=document.querySelectorAll('video,audio,video source,audio source');"
@@ -852,13 +888,29 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "if(!isrc||isrc.indexOf('http')!==0)continue;"
                 + "var nw=Number(im.naturalWidth||0);var nh=Number(im.naturalHeight||0);"
                 + "var rw=Number(im.width||0);var rh=Number(im.height||0);"
-                + "var isCdn=/(douyinpic\\.com|byteimg\\.com|xhscdn\\.com|pbs\\.twimg\\.com\\/media)/i.test(isrc);"
-                + "if((nw>=260&&nh>=260)||(isCdn&&((nw>=160&&nh>=160)||(rw>=160&&rh>=160)))){"
+                + "var isCdn=/(douyinpic\\.com|byteimg\\.com|toutiaoimg\\.com|zjcdn\\.com|douyinstatic\\.com|xhscdn\\.com|pbs\\.twimg\\.com\\/media)/i.test(isrc);"
+                + "if((nw>=240&&nh>=240)||(isCdn&&((nw>=120&&nh>=120)||(rw>=120&&rh>=120)))){"
                 + "sendImage(isrc,docTitle,nw||rw,nh||rh);"
+                + "}"
+                + "}"
+                + "var bgEls=document.querySelectorAll('[style*=\"url\"]');"
+                + "for(var bi=0;bi<bgEls.length&&bi<120;bi++){"
+                + "var st=bgEls[bi].getAttribute('style')||'';"
+                + "var bm=st.match(/url\\([\"']?(https?:\\/\\/[^\"')]+)[\"']?\\)/i);"
+                + "if(bm&&bm[1]&&/(\\.webp|\\.jpg|\\.jpeg|\\.png|douyinpic\\.com|byteimg\\.com|toutiaoimg\\.com|xhscdn\\.com)/i.test(bm[1])){"
+                + "sendImage(bm[1],docTitle,0,0);"
                 + "}"
                 + "}"
                 + "if(window._ROUTER_DATA){scanStructuredNode(window._ROUTER_DATA,docTitle);}"
                 + "if(window.__INITIAL_SSR_STATE__){scanStructuredNode(window.__INITIAL_SSR_STATE__,docTitle);}"
+                + "if(document.documentElement&&window.JoelSniffHook){"
+                + "var htmlStr=document.documentElement.innerHTML||'';"
+                + "var htmlSig=location.href+':'+htmlStr.length;"
+                + "if(triggerHtml||window.__joelLastHtmlSig!==htmlSig){"
+                + "window.__joelLastHtmlSig=htmlSig;"
+                + "window.JoelSniffHook.onHtmlSource(htmlStr,docTitle);"
+                + "}"
+                + "}"
                 + "}catch(e){}"
                 + "};"
                 + "if(!window.__joelSniffInstalled){"
@@ -866,7 +918,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "try{"
                 + "var origPlay=HTMLMediaElement.prototype.play;"
                 + "HTMLMediaElement.prototype.play=function(){"
-                + "setTimeout(function(){window.__joelScanMedia&&window.__joelScanMedia();},300);"
+                + "setTimeout(function(){window.__joelScanMedia&&window.__joelScanMedia(false);},300);"
                 + "return origPlay.apply(this,arguments);"
                 + "};"
                 + "}catch(_){}"
@@ -877,8 +929,10 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "return origFetch.apply(this,arguments).then(function(resp){"
                 + "try{"
                 + "var ct=(resp.headers&&resp.headers.get('content-type'))||'';"
-                + "if(ct.indexOf('application/json')>=0){"
-                + "resp.clone().json().then(function(data){scanStructuredNode(data,(document.title||'').trim());}).catch(function(){});"
+                + "if(ct.indexOf('application/json')>=0||ct.indexOf('text/plain')>=0){"
+                + "resp.clone().text().then(function(txt){"
+                + "if(txt&&txt.length>20&&txt.length<1200000){try{scanStructuredNode(JSON.parse(txt),(document.title||'').trim());}catch(__){}}"
+                + "}).catch(function(){});"
                 + "}"
                 + "}catch(_){}"
                 + "return resp;"
@@ -893,7 +947,7 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "this.addEventListener('load',function(){"
                 + "try{"
                 + "var ct=(this.getResponseHeader('content-type')||'').toLowerCase();"
-                + "if(ct.indexOf('application/json')>=0&&typeof this.responseText==='string'&&this.responseText.length>20&&this.responseText.length<600000){"
+                + "if((ct.indexOf('application/json')>=0||ct.indexOf('text/plain')>=0)&&typeof this.responseText==='string'&&this.responseText.length>20&&this.responseText.length<1200000){"
                 + "var parsed=JSON.parse(this.responseText);"
                 + "scanStructuredNode(parsed,(document.title||'').trim());"
                 + "}"
@@ -902,10 +956,10 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 + "return origOpen.apply(this,arguments);"
                 + "};"
                 + "}catch(_){}"
-                + "setInterval(window.__joelScanMedia,1800);"
+                + "setInterval(function(){window.__joelScanMedia(false);},1800);"
                 + "}"
-                + "window.__joelScanMedia();"
-                + "setTimeout(window.__joelScanMedia,700);"
+                + "window.__joelScanMedia(forceHtml);"
+                + "if(forceHtml){setTimeout(function(){window.__joelScanMedia(true);},900);}"
                 + "})();";
         view.evaluateJavascript(js, null);
     }
@@ -951,7 +1005,16 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || noQuery.endsWith(".html")
                 || noQuery.endsWith(".htm")
                 || noQuery.endsWith(".shtml")
-                || noQuery.endsWith(".map")) {
+                || noQuery.endsWith(".map")
+                || noQuery.endsWith(".m4s")
+                || noQuery.endsWith(".ts")) {
+            return true;
+        }
+        if ((lower.contains("video.twimg.com") || lower.contains("twimg.com/"))
+                && (lower.contains("/aud/")
+                        || lower.contains("/0/0/")
+                        || lower.contains("init.mp4")
+                        || lower.contains(".m4s"))) {
             return true;
         }
         return lower.contains("mon.zijieapi.com")
@@ -959,6 +1022,32 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || lower.contains("doubleclick.net")
                 || lower.contains("google-analytics.com")
                 || lower.contains("arkoselabs.com");
+    }
+
+    private boolean isImageNoiseUrl(String lower) {
+        return lower.contains("avatar")
+                || lower.contains("icon")
+                || lower.contains("emoji")
+                || lower.contains("logo")
+                || lower.contains("favicon")
+                || lower.contains("qrcode")
+                || lower.contains("100x100")
+                || lower.contains("c50x50")
+                || lower.contains("c60x60")
+                || lower.contains(".svg")
+                || lower.contains(".ico")
+                || lower.contains("gstatic.com")
+                || lower.contains("googleapis.com")
+                || lower.contains("bytegoofy.com/ies/douyin_pc_web")
+                || lower.contains("bytescm.com/obj/static");
+    }
+
+    private boolean isImageExtension(String noQuery) {
+        return noQuery.endsWith(".webp")
+                || noQuery.endsWith(".jpg")
+                || noQuery.endsWith(".jpeg")
+                || noQuery.endsWith(".png")
+                || noQuery.endsWith(".gif");
     }
 
     private String detectSniffTypeFromRequest(String url, String secFetchDest, String acceptHeader) {
@@ -987,6 +1076,26 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
             return "audio";
         }
 
+        boolean isKnownImageHost = lower.contains("douyinpic.com")
+                || lower.contains("byteimg.com")
+                || lower.contains("toutiaoimg.com")
+                || lower.contains("douyinstatic.com")
+                || lower.contains("xhscdn.com")
+                || lower.contains("pbs.twimg.com/media")
+                || lower.contains("cdninstagram.com")
+                || lower.contains("fbcdn.net");
+        if (("image".equals(dest)
+                || acc.startsWith("image/")
+                || isImageExtension(noQuery)
+                || isKnownImageHost)
+                && !isImageNoiseUrl(lower)
+                && !noQuery.endsWith(".mp4")
+                && !lower.contains("mime=video")
+                && !lower.contains("mime_type=video")
+                && !lower.contains("/video/")) {
+            return "image";
+        }
+
         if ("video".equals(dest)
                 || acc.startsWith("video/")
                 || noQuery.endsWith(".mp4")
@@ -998,12 +1107,17 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || lower.contains("douyinvod.com")
                 || lower.contains("zjcdn.com")
                 || lower.contains("bytevcloudcdn.com")
+                || lower.contains("bytegoofy.com")
                 || lower.contains("ixigua.com")
+                || lower.contains("snssdk.com/aweme/")
+                || lower.contains("iesdouyin.com/aweme/")
                 || lower.contains("/aweme/v1/play")
                 || lower.contains("/video/tos/")
                 || lower.contains("bilivideo.com")
+                || lower.contains("hdslb.com")
                 || lower.contains("video.twimg.com")
                 || lower.contains("twimg.com/ext_tw_video")
+                || lower.contains("cdninstagram.com")
                 || lower.contains("googlevideo.com/videoplayback")
                 || lower.contains(".mp4?")
                 || lower.contains("mime=video")
@@ -1019,22 +1133,6 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || noQuery.endsWith(".pdf")
                 || lower.contains(".apk?")) {
             return "file";
-        }
-
-        boolean isImageHost = lower.contains("douyinpic.com")
-                || lower.contains("byteimg.com")
-                || lower.contains("xhscdn.com")
-                || lower.contains("pbs.twimg.com/media");
-        if (isImageHost
-                && !lower.contains("avatar")
-                && !lower.contains("icon")
-                && !lower.contains("emoji")
-                && !lower.contains("qrcode")
-                && !lower.contains("100x100")
-                && !lower.contains("c50x50")
-                && !lower.contains("c60x60")
-                && !lower.contains("logo")) {
-            return "image";
         }
 
         return null;
@@ -1061,13 +1159,11 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                 || lower.contains(".mp3?")) {
             return "audio";
         }
-        if (noQuery.endsWith(".jpg")
-                || noQuery.endsWith(".jpeg")
-                || noQuery.endsWith(".png")
-                || noQuery.endsWith(".webp")
-                || noQuery.endsWith(".gif")
+        if (isImageExtension(noQuery)
                 || lower.contains("douyinpic.com")
                 || lower.contains("byteimg.com")
+                || lower.contains("toutiaoimg.com")
+                || lower.contains("douyinstatic.com")
                 || lower.contains("pbs.twimg.com/media")) {
             return "image";
         }
@@ -1258,8 +1354,17 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     res.sizeBytes = totalSize;
                 }
 
-                if ("NET".equals(res.source) && "image".equals(res.mediaType)
-                        && totalSize > 0 && totalSize < 15360L) {
+                // Filter out tiny fMP4 init headers (e.g. 786 B X audio init box) and tiny UI icons (< 18 KB)
+                if ("video".equals(res.mediaType)
+                        && totalSize > 0
+                        && totalSize < 32768L
+                        && !res.url.toLowerCase(Locale.ROOT).contains(".m3u8")) {
+                    emitSniffedUpdateToJs(res, true);
+                    return;
+                }
+                if ("image".equals(res.mediaType)
+                        && totalSize > 0
+                        && totalSize < 15360L) {
                     emitSniffedUpdateToJs(res, true);
                     return;
                 }
@@ -1346,6 +1451,147 @@ public class MainActivity extends Activity implements MultiThreadDownloader.List
                     width,
                     height,
                     -1.0);
+        }
+
+        @JavascriptInterface
+        public void onHtmlSource(final String html, final String pageTitle) {
+            if (html == null || html.isEmpty()) return;
+            final String pageUrl = currentSniffPageUrl != null ? currentSniffPageUrl : "";
+            probeExecutor.execute(new Runnable() {
+                @Override
+                public void run() {
+                    parseHtmlForMedia(html, pageUrl, pageTitle != null ? pageTitle.trim() : "");
+                }
+            });
+        }
+    }
+
+    private void parseHtmlForMedia(String rawHtml, String pageUrl, String pageTitle) {
+        if (rawHtml == null || rawHtml.isEmpty()) return;
+        String clipped = rawHtml.length() > 3500000 ? rawHtml.substring(0, 3500000) : rawHtml;
+
+        StringBuilder buf = new StringBuilder(clipped.length() + 4096);
+        buf.append(clipped);
+        Matcher rdm = RENDER_DATA_PATTERN.matcher(clipped);
+        while (rdm.find()) {
+            try {
+                buf.append('\n').append(URLDecoder.decode(rdm.group(1), "UTF-8"));
+            } catch (Exception ignored) {
+            }
+        }
+
+        String normalized = buf.toString()
+                .replace("\\u002F", "/")
+                .replace("\\u002f", "/")
+                .replace("\\/", "/")
+                .replace("&amp;", "&");
+
+        Matcher vidMatcher = DOUYIN_VIDEO_ID_PATTERN.matcher(normalized);
+        while (vidMatcher.find()) {
+            String vid = vidMatcher.group(1);
+            if (vid != null && !vid.isEmpty()) {
+                try {
+                    String playUrl = "https://www.iesdouyin.com/aweme/v1/play/?video_id="
+                            + URLEncoder.encode(vid, "UTF-8") + "&ratio=1080p&line=0";
+                    reportSniffedResource(
+                            playUrl,
+                            pageUrl,
+                            resolveCookiesForUrl(playUrl, pageUrl),
+                            "DOM",
+                            "video",
+                            pageTitle,
+                            0,
+                            0,
+                            -1.0);
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        Matcher urlMatcher = URL_EXTRACT_PATTERN.matcher(normalized);
+        int captured = 0;
+        while (urlMatcher.find() && captured < 120) {
+            String rawUrl = urlMatcher.group().replaceAll("[),.;!?'\"\\]\\\\]+$", "");
+            String lower = rawUrl.toLowerCase(Locale.ROOT);
+            if (isIgnoredStaticAsset(lower)) continue;
+
+            int q = lower.indexOf('?');
+            String noQuery = q > 0 ? lower.substring(0, q) : lower;
+
+            if (lower.startsWith("https://video.twimg.com/") && noQuery.endsWith(".mp4")) {
+                captured++;
+                reportSniffedResource(
+                        rawUrl,
+                        pageUrl,
+                        resolveCookiesForUrl(rawUrl, pageUrl),
+                        "DOM",
+                        "video",
+                        pageTitle,
+                        0,
+                        0,
+                        -1.0);
+                continue;
+            }
+
+            if (lower.contains("douyinvod.com")
+                    || lower.contains("bytevcloudcdn.com")
+                    || lower.contains("/aweme/v1/play")
+                    || (lower.contains("zjcdn.com") && !isImageExtension(noQuery))
+                    || noQuery.endsWith(".mp4")
+                    || noQuery.endsWith(".m3u8")) {
+                String cleanVideo = rawUrl.contains("/playwm/")
+                        ? rawUrl.replace("/playwm/", "/play/")
+                        : rawUrl;
+                captured++;
+                reportSniffedResource(
+                        cleanVideo,
+                        pageUrl,
+                        resolveCookiesForUrl(cleanVideo, pageUrl),
+                        "DOM",
+                        "video",
+                        pageTitle,
+                        0,
+                        0,
+                        -1.0);
+                continue;
+            }
+
+            if (noQuery.endsWith(".mp3") || noQuery.endsWith(".m4a")) {
+                captured++;
+                reportSniffedResource(
+                        rawUrl,
+                        pageUrl,
+                        resolveCookiesForUrl(rawUrl, pageUrl),
+                        "DOM",
+                        "audio",
+                        pageTitle,
+                        0,
+                        0,
+                        -1.0);
+                continue;
+            }
+
+            boolean isContentImgHost = lower.contains("douyinpic.com")
+                    || lower.contains("byteimg.com")
+                    || lower.contains("toutiaoimg.com")
+                    || lower.contains("xhscdn.com")
+                    || lower.contains("pbs.twimg.com/media")
+                    || lower.contains("~tplv-dy-");
+            if (isContentImgHost
+                    && (isImageExtension(noQuery) || lower.contains("pbs.twimg.com/media") || lower.contains("douyinpic.com"))
+                    && !isImageNoiseUrl(lower)) {
+                captured++;
+                reportSniffedResource(
+                        rawUrl,
+                        pageUrl,
+                        resolveCookiesForUrl(rawUrl, pageUrl),
+                        "DOM",
+                        "image",
+                        pageTitle,
+                        0,
+                        0,
+                        -1.0);
+            }
         }
     }
 
