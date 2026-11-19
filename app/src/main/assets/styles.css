@@ -54,6 +54,8 @@ html, body {
   display: flex;
   flex-direction: column;
   height: 100%;
+  width: 100%;
+  overflow: hidden;
   max-width: 680px;
   margin: 0 auto;
   background: var(--bg);
@@ -730,9 +732,67 @@ html, body {
 }
 
 /* Sniffer Tab */
-.sniffer-input-row {
+.sniffer-paste-area {
+  min-height: 60px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.sniffer-clean-preview {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--primary-soft);
+  border: 1px solid #bfdbfe;
+}
+
+.sniffer-clean-head {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.clean-url-box.compact {
+  margin-bottom: 0;
+  max-height: 54px;
+  background: #ffffff;
+}
+
+.sniffer-actions-row {
+  display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.sniff-filter-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 2px 0;
+  scrollbar-width: none;
+}
+
+.sniff-filter-row::-webkit-scrollbar {
+  display: none;
+}
+
+.filter-chip {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.filter-chip.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #ffffff;
+  box-shadow: none;
 }
 
 .section-subhead {
@@ -745,14 +805,119 @@ html, body {
   padding: 2px 2px;
 }
 
+.sniff-meta-row {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.meta-pill {
+  font-family: ui-monospace, "Roboto Mono", monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-sub);
+  background: var(--surface-soft);
+  padding: 2px 7px;
+  border-radius: 6px;
+}
+
+.meta-pill.dom-pill {
+  background: var(--green-soft);
+  color: var(--green-text);
+}
+
 .sniff-url {
   margin-top: 6px;
   font-family: ui-monospace, "Roboto Mono", monospace;
   font-size: 11px;
   color: var(--text-muted);
   word-break: break-all;
-  max-height: 48px;
+  max-height: 44px;
   overflow: hidden;
+}
+
+/* Mini Preview Drawer inside Sniffed Card */
+.preview-drawer {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #f8fafc;
+}
+
+.mini-preview-video {
+  width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  background: #000000;
+  display: block;
+  object-fit: contain;
+}
+
+.mini-preview-audio {
+  width: 100%;
+  height: 42px;
+  display: block;
+}
+
+.mini-preview-img {
+  width: 100%;
+  max-height: 220px;
+  border-radius: 8px;
+  background: #000000;
+  display: block;
+  object-fit: contain;
+}
+
+.preview-file-box {
+  padding: 10px;
+  border-radius: 8px;
+  background: #1e293b;
+  font-size: 12px;
+  color: #e2e8f0;
+  word-break: break-all;
+}
+
+.preview-meta-bar {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 11px;
+  color: #cbd5e1;
+  font-family: ui-monospace, "Roboto Mono", monospace;
+}
+
+.preview-rename-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.preview-rename-input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #f8fafc;
+  padding: 0 9px;
+  font-size: 12px;
+  outline: none;
+}
+
+.preview-rename-input:focus {
+  border-color: #60a5fa;
+}
+
+.btn-preview-active {
+  background: #0f172a;
+  color: #ffffff;
 }
 
 /* Settings Tab */
@@ -790,8 +955,7 @@ html, body {
 /* Bottom Navigation Bar */
 .bottom-nav {
   flex-shrink: 0;
-  height: calc(62px + env(safe-area-inset-bottom, 0px));
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  height: 60px;
   background: var(--surface);
   border-top: 1px solid var(--border);
   display: grid;
@@ -853,7 +1017,7 @@ html, body {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: 78px;
+  bottom: 72px;
   transform: translateX(-50%);
   background: #0f172a;
   color: #ffffff;
@@ -865,4 +1029,43 @@ html, body {
   z-index: 999;
   max-width: 90vw;
   text-align: center;
+}
+
+/* Responsive adjustments for narrow & high-aspect mobile screens */
+@media (max-width: 390px) {
+  .top-bar {
+    height: 54px;
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .brand-name {
+    font-size: 14px;
+  }
+
+  .brand-sub {
+    display: none;
+  }
+
+  .speed-pill {
+    padding: 4px 8px;
+    font-size: 10px;
+  }
+
+  .lang-btn {
+    padding: 4px 6px;
+    font-size: 10px;
+  }
+
+  .main-scroll {
+    padding: 12px 10px 16px;
+  }
+
+  .card {
+    padding: 12px;
+  }
+
+  .thread-grid {
+    gap: 6px;
+  }
 }

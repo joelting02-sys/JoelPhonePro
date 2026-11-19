@@ -147,19 +147,42 @@
       <!-- Tab 3: Native Web Media Sniffer -->
       <section class="tab-panel" id="panel-sniffer">
         <div class="card">
-          <h2 class="card-title" id="snifferTitle">内置网页媒体与资源嗅探</h2>
+          <div class="card-head">
+            <h2 class="card-title" id="snifferTitle">内置网页媒体与资源嗅探</h2>
+            <span class="chip-soft" id="snifferSmartBadge">自动去杂字</span>
+          </div>
           <p class="card-desc" id="snifferDesc">
-            遇到网盘落地页或网页内嵌视频时，在内置浏览器打开它，自动捕获真实媒体直链与当前 Cookie / Referer 并多线程拉取。
+            支持直接粘贴抖音 / 小红书 / B站整段分享文案或网页链接，自动剔除多余文字后打开内置浏览器嗅探真实视频直链，并支持下载前「预浏览」确认内容。
           </p>
-          <div class="sniffer-input-row">
-            <input type="url" id="snifferUrlBox" class="text-input mono flex-1" placeholder="https://..." />
-            <button type="button" class="btn btn-primary" id="launchSnifferBtn">🌐 打开嗅探</button>
+          <textarea
+            id="snifferUrlBox"
+            class="paste-area sniffer-paste-area"
+            rows="2"
+            placeholder="粘贴抖音/小红书分享文案（如：7.46 复制打开抖音… https://v.douyin.com/…）或网页链接…"
+          ></textarea>
+          <div class="sniffer-clean-preview hidden" id="snifferCleanPreviewWrap">
+            <div class="sniffer-clean-head">
+              <span class="badge-blue" id="snifferExtractBadge">已自动过滤杂字</span>
+            </div>
+            <div class="clean-url-box compact" id="snifferCleanUrlText"></div>
+          </div>
+          <div class="sniffer-actions-row">
+            <button type="button" class="btn btn-primary flex-1" id="snifferPasteGoBtn">📋 粘贴并嗅探</button>
+            <button type="button" class="btn btn-subtle" id="launchSnifferBtn">🌐 打开嗅探</button>
+            <button type="button" class="btn btn-ghost" id="snifferClearInputBtn">清空</button>
           </div>
         </div>
 
         <div class="section-subhead">
           <span id="sniffedListTitle">已捕获资源</span>
           <button type="button" class="link-mini" id="clearSniffedBtn">清空列表</button>
+        </div>
+
+        <div class="sniff-filter-row" id="sniffTypeFilterSwitch">
+          <button type="button" class="seg-btn filter-chip active" data-type="all" id="sniffFilterAllBtn">全部</button>
+          <button type="button" class="seg-btn filter-chip" data-type="video" id="sniffFilterVideoBtn">🎬 视频</button>
+          <button type="button" class="seg-btn filter-chip" data-type="audio" id="sniffFilterAudioBtn">🎵 音频</button>
+          <button type="button" class="seg-btn filter-chip" data-type="file" id="sniffFilterFileBtn">📦 文件</button>
         </div>
 
         <div id="sniffedListContainer" class="task-list"></div>

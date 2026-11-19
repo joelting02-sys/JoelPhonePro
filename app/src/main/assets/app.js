@@ -32,12 +32,37 @@ const I18N = {
     emptyTasks: "暂无下载任务，去「智能提取」粘贴链接即可开始多线程下载。",
     emptyFiltered: "当前筛选条件下没有任务。",
     goExtractBtn: "前往粘贴链接",
+    snifferSmartBadge: "自动去杂字",
     snifferTitle: "内置网页媒体与资源嗅探",
-    snifferDesc: "遇到网盘落地页或网页内嵌视频时，在内置浏览器打开它，自动捕获真实媒体直链与当前 Cookie / Referer 并多线程拉取。",
+    snifferDesc: "支持直接粘贴抖音 / 小红书 / B站整段分享文案或网页链接，自动剔除多余文字后打开内置浏览器嗅探真实视频直链，并支持下载前「预浏览」确认内容。",
+    snifferPlaceholder: "粘贴抖音/小红书分享文案（如：7.46 复制打开抖音… https://v.douyin.com/…）或网页链接…",
+    snifferExtractBadge: "已自动过滤多余分享文字",
+    snifferPasteGoBtn: "📋 粘贴并嗅探",
     launchSnifferBtn: "🌐 打开嗅探",
+    snifferClearInputBtn: "清空",
     sniffedListTitle: "已捕获资源",
     clearSniffedBtn: "清空列表",
-    emptySniffed: "暂无捕获到的媒体直链。打开任意视频或资源网页播放后，捕获的资源会显示在这里。",
+    sniffFilterAllBtn: "全部",
+    sniffFilterVideoBtn: "🎬 视频",
+    sniffFilterAudioBtn: "🎵 音频",
+    sniffFilterFileBtn: "📦 文件",
+    emptySniffed: "暂无捕获到的媒体直链。粘贴抖音或网页链接打开嗅探并播放，资源会显示在这里。",
+    emptySniffedFiltered: "当前分类下没有捕获到的资源。",
+    btnPreviewOpen: "👁️ 预浏览",
+    btnPreviewClose: "🔼 收起预览",
+    btnPreviewDownloadNow: "⚡ 立即下载",
+    previewLoading: "正在加载媒体元信息…",
+    previewLoadError: "无法在线预浏览此流（可能需鉴权或为加密流），仍可尝试多线程下载。",
+    previewFileLabel: "文件预览信息",
+    previewRenamePlaceholder: "可重命名保存文件名…",
+    mediaLabelVideo: "🎬 视频",
+    mediaLabelAudio: "🎵 音频",
+    mediaLabelImage: "🖼️ 图片",
+    mediaLabelFile: "📦 文件",
+    badgeDomPrimary: "页面主媒体",
+    sizeProbing: "探测大小中…",
+    toastExtractedSniff: "已剔除杂字提取链接，正在打开嗅探",
+    toastSniffNoUrl: "未检测到有效 http/https 链接，请检查粘贴内容",
     settingsHeading: "下载引擎设置",
     setDefaultThreadsLabel: "默认并发线程数",
     setConcurrentLabel: "同时运行任务上限",
@@ -109,12 +134,37 @@ const I18N = {
     emptyTasks: "No downloads yet. Paste a link in Extract tab to start fast parallel downloading.",
     emptyFiltered: "No tasks match this filter.",
     goExtractBtn: "Go Extract Link",
+    snifferSmartBadge: "Auto URL Clean",
     snifferTitle: "Built-in Web Media & File Sniffer",
-    snifferDesc: "Open video or landing pages in the built-in browser to capture real media/file URLs together with active Cookie & Referer headers.",
+    snifferDesc: "Paste Douyin / Xiaohongshu / Bilibili share copy or webpage links directly. Extra text is stripped automatically, with inline Mini Preview before downloading.",
+    snifferPlaceholder: "Paste share copy (mixed text + URL) or webpage URL…",
+    snifferExtractBadge: "Noise stripped · Clean URL ready",
+    snifferPasteGoBtn: "📋 Paste & Sniff",
     launchSnifferBtn: "🌐 Open Sniffer",
+    snifferClearInputBtn: "Clear",
     sniffedListTitle: "Captured Resources",
     clearSniffedBtn: "Clear",
-    emptySniffed: "No media streams captured yet. Open a webpage above and play media to detect direct links.",
+    sniffFilterAllBtn: "All",
+    sniffFilterVideoBtn: "🎬 Video",
+    sniffFilterAudioBtn: "🎵 Audio",
+    sniffFilterFileBtn: "📦 File",
+    emptySniffed: "No media streams captured yet. Paste a share text or webpage URL above to detect media links.",
+    emptySniffedFiltered: "No captured resources match this category.",
+    btnPreviewOpen: "👁️ Preview",
+    btnPreviewClose: "🔼 Hide",
+    btnPreviewDownloadNow: "⚡ Download",
+    previewLoading: "Loading media stream metadata…",
+    previewLoadError: "Cannot stream inline preview (token/DRM restriction), you can still try downloading.",
+    previewFileLabel: "File Info",
+    previewRenamePlaceholder: "Optional filename…",
+    mediaLabelVideo: "🎬 Video",
+    mediaLabelAudio: "🎵 Audio",
+    mediaLabelImage: "🖼️ Image",
+    mediaLabelFile: "📦 File",
+    badgeDomPrimary: "DOM Media",
+    sizeProbing: "Probing size…",
+    toastExtractedSniff: "Cleaned share text & opening sniffer",
+    toastSniffNoUrl: "No valid http/https URL detected in input",
     settingsHeading: "Engine Settings",
     setDefaultThreadsLabel: "Default Thread Count",
     setConcurrentLabel: "Max Concurrent Downloads",
@@ -162,9 +212,12 @@ const appState = {
   lang: "zh",
   activeTab: "extract",
   filter: "all",
+  sniffTypeFilter: "all",
+  activePreviewUrl: null,
   selectedThreads: 16,
   headersExpanded: false,
   extractedUrl: "",
+  snifferCleanUrl: "",
   tasks: [],
   sniffed: [],
   settings: {
@@ -293,11 +346,20 @@ function applyI18n() {
   syncText("filterDoneBtn", dict.filterDoneBtn);
   syncText("clearDoneBtn", dict.clearDoneBtn);
 
+  syncText("snifferSmartBadge", dict.snifferSmartBadge);
   syncText("snifferTitle", dict.snifferTitle);
   syncText("snifferDesc", dict.snifferDesc);
+  if ($("snifferUrlBox")) $("snifferUrlBox").placeholder = dict.snifferPlaceholder;
+  syncText("snifferExtractBadge", dict.snifferExtractBadge);
+  syncText("snifferPasteGoBtn", dict.snifferPasteGoBtn);
   syncText("launchSnifferBtn", dict.launchSnifferBtn);
+  syncText("snifferClearInputBtn", dict.snifferClearInputBtn);
   syncText("sniffedListTitle", dict.sniffedListTitle);
   syncText("clearSniffedBtn", dict.clearSniffedBtn);
+  syncText("sniffFilterAllBtn", dict.sniffFilterAllBtn);
+  syncText("sniffFilterVideoBtn", dict.sniffFilterVideoBtn);
+  syncText("sniffFilterAudioBtn", dict.sniffFilterAudioBtn);
+  syncText("sniffFilterFileBtn", dict.sniffFilterFileBtn);
 
   syncText("settingsHeading", dict.settingsHeading);
   syncText("setDefaultThreadsLabel", dict.setDefaultThreadsLabel);
@@ -326,6 +388,7 @@ function applyI18n() {
   });
 
   renderExtractor();
+  renderSnifferInput();
   renderTasks();
   renderSniffed();
   renderSettings();
@@ -562,6 +625,113 @@ function renderTasks() {
   }
 }
 
+function resolveSnifferTarget(rawText) {
+  const extracted = extractCleanUrl(rawText);
+  if (extracted.cleanUrl) {
+    return extracted;
+  }
+  const trimmed = String(rawText || "").trim();
+  if (/^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}(\/.*)?$/.test(trimmed)) {
+    return { cleanUrl: `https://${trimmed}`, hadNoise: false, fileName: "" };
+  }
+  return { cleanUrl: "", hadNoise: false, fileName: "" };
+}
+
+function renderSnifferInput() {
+  const el = $("snifferUrlBox");
+  const wrap = $("snifferCleanPreviewWrap");
+  const urlEl = $("snifferCleanUrlText");
+  if (!el || !wrap || !urlEl) return;
+  const res = resolveSnifferTarget(el.value);
+  appState.snifferCleanUrl = res.cleanUrl;
+  if (res.cleanUrl && res.hadNoise) {
+    urlEl.textContent = res.cleanUrl;
+    wrap.classList.remove("hidden");
+  } else {
+    urlEl.textContent = "";
+    wrap.classList.add("hidden");
+  }
+}
+
+function deriveSniffedFileName(item) {
+  if (item.customFileName && item.customFileName.trim()) {
+    return item.customFileName.trim();
+  }
+  if (item.suggestedName && item.suggestedName.trim()) {
+    return item.suggestedName.trim().replace(/[\\/:*?"<>|\r\n]+/g, "_");
+  }
+  const urlInfo = extractCleanUrl(item.url);
+  if (item.title && item.title.trim()) {
+    const cleanTitle = item.title
+      .trim()
+      .replace(/[\\/:*?"<>|#\r\n]+/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 48);
+    if (cleanTitle) {
+      let ext = ".mp4";
+      if (item.mediaType === "audio") ext = ".m4a";
+      else if (item.mediaType === "image") ext = ".jpg";
+      else if (item.mediaType === "file" && urlInfo.fileName && urlInfo.fileName.includes(".")) {
+        ext = `.${urlInfo.fileName.split(".").pop()}`;
+      } else if (urlInfo.fileName && /\.(mp4|mkv|mov|webm|m3u8|mp3|m4a|wav|flac|apk|zip|pdf)$/i.test(urlInfo.fileName)) {
+        ext = `.${urlInfo.fileName.split(".").pop().toLowerCase()}`;
+      }
+      return `${cleanTitle}${ext}`;
+    }
+  }
+  return urlInfo.fileName || "captured_media.mp4";
+}
+
+function getSniffMediaLabel(dict, mediaType) {
+  if (mediaType === "audio") return dict.mediaLabelAudio;
+  if (mediaType === "image") return dict.mediaLabelImage;
+  if (mediaType === "file") return dict.mediaLabelFile;
+  return dict.mediaLabelVideo;
+}
+
+function buildSniffMetaPillsHtml(item, dict) {
+  const pills = [];
+  pills.push(`<span class="meta-pill">${escapeHtml(getSniffMediaLabel(dict, item.mediaType))}</span>`);
+  if (item.source === "DOM") {
+    pills.push(`<span class="meta-pill dom-pill">${escapeHtml(dict.badgeDomPrimary)}</span>`);
+  }
+  if (item.sizeBytes && Number(item.sizeBytes) > 0) {
+    pills.push(`<span class="meta-pill" data-sniff-size="1">${escapeHtml(formatBytes(Number(item.sizeBytes)))}</span>`);
+  } else {
+    pills.push(`<span class="meta-pill" data-sniff-size="1">${escapeHtml(dict.sizeProbing)}</span>`);
+  }
+  if (item.width > 0 && item.height > 0) {
+    pills.push(`<span class="meta-pill">${item.width}×${item.height}</span>`);
+  }
+  if (item.durationSec > 0) {
+    pills.push(`<span class="meta-pill">${escapeHtml(formatEta(item.durationSec))}</span>`);
+  }
+  return pills.join("");
+}
+
+function matchesSniffFilter(item, filterType) {
+  if (filterType === "all") return true;
+  const mt = item.mediaType || "video";
+  if (filterType === "file") {
+    return mt === "file" || mt === "image";
+  }
+  return mt === filterType;
+}
+
+function updateActivePreviewMetaText(metaBarEl, item, videoEl, dict) {
+  if (!metaBarEl) return;
+  const parts = [];
+  if (item.sizeBytes > 0) parts.push(formatBytes(item.sizeBytes));
+  const w = videoEl && videoEl.videoWidth ? videoEl.videoWidth : item.width;
+  const h = videoEl && videoEl.videoHeight ? videoEl.videoHeight : item.height;
+  if (w > 0 && h > 0) parts.push(`${w}×${h}`);
+  const dur = videoEl && isFinite(videoEl.duration) && videoEl.duration > 0 ? videoEl.duration : item.durationSec;
+  if (dur > 0) parts.push(formatEta(dur));
+  if (item.contentType) parts.push(item.contentType);
+  metaBarEl.textContent = parts.length ? parts.join(" · ") : dict.previewLoading;
+}
+
 function renderSniffed() {
   const dict = t();
   const list = appState.sniffed || [];
@@ -573,51 +743,107 @@ function renderSniffed() {
     badge.classList.add("hidden");
   }
 
+  document.querySelectorAll("#sniffTypeFilterSwitch .seg-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.type === appState.sniffTypeFilter);
+  });
+
   const box = $("sniffedListContainer");
   if (!list.length) {
     box.innerHTML = `<div class="card empty-card">${escapeHtml(dict.emptySniffed)}</div>`;
     return;
   }
 
+  const filtered = list
+    .filter((item) => matchesSniffFilter(item, appState.sniffTypeFilter))
+    .slice()
+    .sort((a, b) => {
+      const aDom = a.source === "DOM" ? 1 : 0;
+      const bDom = b.source === "DOM" ? 1 : 0;
+      if (aDom !== bDom) return bDom - aDom;
+      return (b.capturedAt || 0) - (a.capturedAt || 0);
+    });
+
+  if (!filtered.length) {
+    box.innerHTML = `<div class="card empty-card">${escapeHtml(dict.emptySniffedFiltered)}</div>`;
+    return;
+  }
+
   box.innerHTML = "";
-  for (const item of list) {
-    const info = extractCleanUrl(item.url);
-    const fileName = info.fileName || "captured_media.mp4";
+  for (const item of filtered) {
+    const fileName = deriveSniffedFileName(item);
+    const isPreviewOpen = appState.activePreviewUrl === item.url;
+    const previewSrc = item.previewUrl || item.url;
+    const mt = item.mediaType || "video";
     const card = document.createElement("div");
     card.className = "task-card";
+    card.dataset.sniffUrl = item.url;
     let host = "";
     try {
       host = new URL(item.url).hostname;
     } catch {}
 
+    let previewDrawerHtml = "";
+    if (isPreviewOpen) {
+      let playerHtml = "";
+      if (mt === "audio") {
+        playerHtml = `<audio class="mini-preview-audio" controls autoplay preload="metadata" src="${escapeHtml(previewSrc)}"></audio>`;
+      } else if (mt === "image") {
+        playerHtml = `<img class="mini-preview-img" src="${escapeHtml(previewSrc)}" alt="preview" />`;
+      } else if (mt === "file") {
+        playerHtml = `<div class="preview-file-box">${escapeHtml(dict.previewFileLabel)}: ${escapeHtml(fileName)}${item.contentType ? ` (${escapeHtml(item.contentType)})` : ""}</div>`;
+      } else {
+        playerHtml = `<video class="mini-preview-video" controls playsinline autoplay preload="metadata" src="${escapeHtml(previewSrc)}"></video>`;
+      }
+      previewDrawerHtml = `
+        <div class="preview-drawer">
+          ${playerHtml}
+          <div class="preview-meta-bar" data-preview-meta="1">${escapeHtml(dict.previewLoading)}</div>
+          <div class="preview-rename-row">
+            <input type="text" class="preview-rename-input" data-preview-name="1" value="${escapeHtml(fileName)}" placeholder="${escapeHtml(dict.previewRenamePlaceholder)}" />
+            <button type="button" class="btn btn-primary btn-sm" data-sniff-act="dl-now">${escapeHtml(dict.btnPreviewDownloadNow)}</button>
+          </div>
+        </div>
+      `;
+    }
+
     card.innerHTML = `
       <div class="task-top">
         <div class="task-title-wrap">
-          <span class="ext-badge">${escapeHtml(inferExtBadge(fileName))}</span>
-          <span class="task-name">${escapeHtml(fileName)}</span>
+          <span class="ext-badge" data-sniff-ext="1">${escapeHtml(inferExtBadge(fileName))}</span>
+          <span class="task-name" data-sniff-title="1">${escapeHtml(fileName)}</span>
         </div>
         <span class="chip-soft">${escapeHtml(host)}</span>
       </div>
+      <div class="sniff-meta-row" data-sniff-meta="1">${buildSniffMetaPillsHtml(item, dict)}</div>
       <div class="sniff-url">${escapeHtml(item.url)}</div>
       <div class="task-actions">
+        <button type="button" class="btn ${isPreviewOpen ? "btn-preview-active" : "btn-subtle"} btn-sm" data-sniff-act="preview">${escapeHtml(isPreviewOpen ? dict.btnPreviewClose : dict.btnPreviewOpen)}</button>
         <button type="button" class="btn btn-primary btn-sm" data-sniff-act="dl">${escapeHtml(dict.btnSniffDownload(appState.selectedThreads))}</button>
         <button type="button" class="btn btn-subtle btn-sm" data-sniff-act="fill">${escapeHtml(dict.btnSniffFill)}</button>
       </div>
+      ${previewDrawerHtml}
     `;
+
+    card.querySelector('[data-sniff-act="preview"]').addEventListener("click", () => {
+      appState.activePreviewUrl = isPreviewOpen ? null : item.url;
+      renderSniffed();
+    });
 
     card.querySelector('[data-sniff-act="dl"]').addEventListener("click", () => {
       triggerNativeDownload({
         url: item.url,
-        fileName,
+        fileName: deriveSniffedFileName(item),
         threads: appState.selectedThreads,
         referer: item.referer || "",
         cookie: item.cookie || "",
+        uaMode: item.uaMode || appState.settings.defaultUaMode || "desktop",
       });
     });
 
     card.querySelector('[data-sniff-act="fill"]').addEventListener("click", () => {
+      const currentName = deriveSniffedFileName(item);
       $("rawInput").value = item.url;
-      $("fileNameInput").value = fileName;
+      $("fileNameInput").value = currentName;
       $("fileNameInput").dataset.userEdited = "1";
       $("refererInput").value = item.referer || "";
       $("cookieInput").value = item.cookie || "";
@@ -628,6 +854,56 @@ function renderSniffed() {
       renderExtractor();
       window.switchTab("extract");
     });
+
+    if (isPreviewOpen) {
+      const metaBarEl = card.querySelector('[data-preview-meta="1"]');
+      const mediaEl = card.querySelector("video, audio");
+      const nameInput = card.querySelector('[data-preview-name="1"]');
+      updateActivePreviewMetaText(metaBarEl, item, mediaEl, dict);
+
+      if (mediaEl) {
+        mediaEl.addEventListener("loadedmetadata", () => {
+          if (mediaEl.videoWidth > 0) {
+            item.width = mediaEl.videoWidth;
+            item.height = mediaEl.videoHeight;
+          }
+          if (isFinite(mediaEl.duration) && mediaEl.duration > 0) {
+            item.durationSec = mediaEl.duration;
+          }
+          updateActivePreviewMetaText(metaBarEl, item, mediaEl, dict);
+        });
+        mediaEl.addEventListener("error", () => {
+          if (metaBarEl) {
+            metaBarEl.textContent = dict.previewLoadError;
+          }
+        });
+      }
+
+      if (nameInput) {
+        nameInput.addEventListener("input", () => {
+          item.customFileName = nameInput.value;
+          const titleEl = card.querySelector('[data-sniff-title="1"]');
+          const extEl = card.querySelector('[data-sniff-ext="1"]');
+          const nextName = deriveSniffedFileName(item);
+          if (titleEl) titleEl.textContent = nextName;
+          if (extEl) extEl.textContent = inferExtBadge(nextName);
+        });
+      }
+
+      const dlNowBtn = card.querySelector('[data-sniff-act="dl-now"]');
+      if (dlNowBtn) {
+        dlNowBtn.addEventListener("click", () => {
+          triggerNativeDownload({
+            url: item.url,
+            fileName: deriveSniffedFileName(item),
+            threads: appState.selectedThreads,
+            referer: item.referer || "",
+            cookie: item.cookie || "",
+            uaMode: item.uaMode || appState.settings.defaultUaMode || "desktop",
+          });
+        });
+      }
+    }
 
     box.appendChild(card);
   }
@@ -646,7 +922,7 @@ function renderSettings() {
   });
 }
 
-function triggerNativeDownload({ url, fileName, threads, referer, cookie }) {
+function triggerNativeDownload({ url, fileName, threads, referer, cookie, uaMode }) {
   const dict = t();
   if (!url) {
     showToast(dict.toastNeedUrl);
@@ -662,7 +938,7 @@ function triggerNativeDownload({ url, fileName, threads, referer, cookie }) {
     threads || appState.selectedThreads,
     referer || "",
     cookie || "",
-    appState.settings.defaultUaMode || "desktop"
+    uaMode || appState.settings.defaultUaMode || "desktop"
   );
   try {
     const res = JSON.parse(resRaw || "{}");
@@ -729,6 +1005,50 @@ window.onSniffedMedia = function onSniffedMedia(item) {
   if (!item || !item.url) return;
   if (appState.sniffed.some((x) => x.url === item.url)) return;
   appState.sniffed.unshift(item);
+  renderSniffed();
+};
+
+window.onSniffedMediaUpdate = function onSniffedMediaUpdate(payload) {
+  if (!payload || !payload.url) return;
+  const idx = appState.sniffed.findIndex((x) => x.url === payload.url);
+  if (idx < 0) return;
+
+  if (payload.invalid) {
+    appState.sniffed.splice(idx, 1);
+    if (appState.activePreviewUrl === payload.url) {
+      appState.activePreviewUrl = null;
+    }
+    renderSniffed();
+    return;
+  }
+
+  const prev = appState.sniffed[idx];
+  const merged = { ...prev, ...payload, customFileName: prev.customFileName };
+  appState.sniffed[idx] = merged;
+
+  // Non-destructive update if this card currently has an active inline preview player
+  if (appState.activePreviewUrl === payload.url) {
+    const cards = document.querySelectorAll("#sniffedListContainer .task-card");
+    for (const card of cards) {
+      if (card.dataset.sniffUrl === payload.url) {
+        const dict = t();
+        const metaRow = card.querySelector('[data-sniff-meta="1"]');
+        if (metaRow) {
+          metaRow.innerHTML = buildSniffMetaPillsHtml(merged, dict);
+        }
+        const derivedName = deriveSniffedFileName(merged);
+        const titleEl = card.querySelector('[data-sniff-title="1"]');
+        const extEl = card.querySelector('[data-sniff-ext="1"]');
+        if (titleEl) titleEl.textContent = derivedName;
+        if (extEl) extEl.textContent = inferExtBadge(derivedName);
+        const metaBar = card.querySelector('[data-preview-meta="1"]');
+        const mediaEl = card.querySelector("video, audio");
+        updateActivePreviewMetaText(metaBar, merged, mediaEl, dict);
+        return;
+      }
+    }
+  }
+
   renderSniffed();
 };
 
@@ -829,6 +1149,7 @@ function bindEvents() {
       return;
     }
     $("snifferUrlBox").value = targetUrl;
+    renderSnifferInput();
     if (window.JoelNative) {
       window.JoelNative.openBrowserSniffer(targetUrl);
     } else {
@@ -857,21 +1178,74 @@ function bindEvents() {
   });
 
   // Sniffer Tab
+  $("snifferUrlBox").addEventListener("input", () => {
+    renderSnifferInput();
+  });
+
+  $("snifferClearInputBtn").addEventListener("click", () => {
+    $("snifferUrlBox").value = "";
+    renderSnifferInput();
+  });
+
+  $("snifferPasteGoBtn").addEventListener("click", async () => {
+    let text = "";
+    if (window.JoelNative) {
+      text = window.JoelNative.getClipboardText() || "";
+    } else if (navigator.clipboard?.readText) {
+      try {
+        text = await navigator.clipboard.readText();
+      } catch {}
+    }
+    if (!text.trim()) {
+      showToast(t().toastClipboardEmpty);
+      return;
+    }
+    $("snifferUrlBox").value = text;
+    renderSnifferInput();
+    const res = resolveSnifferTarget(text);
+    if (!res.cleanUrl) {
+      showToast(t().toastSniffNoUrl);
+      return;
+    }
+    showToast(res.hadNoise ? t().toastExtractedSniff : t().launchSnifferBtn);
+    if (window.JoelNative) {
+      window.JoelNative.openBrowserSniffer(res.cleanUrl);
+    } else {
+      showToast(t().toastBrowserPreview);
+    }
+  });
+
   $("launchSnifferBtn").addEventListener("click", () => {
     const raw = $("snifferUrlBox").value.trim();
     if (!raw) {
       showToast(t().toastNeedUrl);
       return;
     }
+    const res = resolveSnifferTarget(raw);
+    if (!res.cleanUrl) {
+      showToast(t().toastSniffNoUrl);
+      return;
+    }
+    if (res.hadNoise) {
+      showToast(t().toastExtractedSniff);
+    }
     if (window.JoelNative) {
-      window.JoelNative.openBrowserSniffer(raw);
+      window.JoelNative.openBrowserSniffer(res.cleanUrl);
     } else {
       showToast(t().toastBrowserPreview);
     }
   });
 
+  document.querySelectorAll("#sniffTypeFilterSwitch .seg-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      appState.sniffTypeFilter = btn.dataset.type || "all";
+      renderSniffed();
+    });
+  });
+
   $("clearSniffedBtn").addEventListener("click", () => {
     appState.sniffed = [];
+    appState.activePreviewUrl = null;
     renderSniffed();
   });
 
